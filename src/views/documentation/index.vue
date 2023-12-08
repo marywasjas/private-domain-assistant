@@ -85,7 +85,7 @@
           ></el-input-number>
         </div>
 
-        <div style="margin-top: 15px" v-if="dialogMode != '1'">
+        <div style="margin-top: 15px" v-if="dialogMode == '2'">
           <el-collapse class="leftCollapse" v-model="activeNames2">
             <el-collapse-item title="知识库配置" name="1">
               请选择知识库
@@ -99,6 +99,39 @@
                 </el-option>
               </el-select>
               匹配知识条数
+              <el-input-number
+                style="100%"
+                v-model="roundsValue"
+                :min="0"
+                :max="1000"
+                label="描述文字"
+              ></el-input-number>
+              知识匹配分数阈值
+              <el-slider
+                style="margin: 0 10px"
+                v-model="sliderValue"
+                :format-tooltip="formatTooltip"
+                :marks="marks"
+                :show-tooltip="true"
+              ></el-slider>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+
+        <div style="margin-top: 15px" v-if="dialogMode == '3'">
+          <el-collapse class="leftCollapse" v-model="activeNames2">
+            <el-collapse-item title="搜索引擎匹配" name="1">
+              请选择搜索引擎
+              <el-select v-model="value" style="width: 100%">
+                <el-option
+                  v-for="item in options"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                >
+                </el-option>
+              </el-select>
+              匹配搜索结果条数
               <el-input-number
                 style="100%"
                 v-model="roundsValue"
@@ -132,6 +165,7 @@
           <!-- 信息 -->
           <div v-for="message in messages" :key="message.id" class="message">
             <img v-if="!message.isFromUser" src="../../../public/chat.png" />
+            <img v-else src="../../../public/personal.png" />
             <span
               id="content"
               :class="{
@@ -183,14 +217,15 @@
           v-if="isCreate"
           ref="formCreate"
           :model="formCreate"
+          :rules="rules"
           style="
             width: 70%;
             border: 1px solid #ebeef5;
             border-radius: 10px;
-            padding: 20px;
+            padding: 15px 20px 0px;
           "
         >
-          <el-form-item>
+          <el-form-item prop="name">
             <div>新建知识库名称</div>
             <el-input
               v-model="formCreate.name"
@@ -198,7 +233,7 @@
             ></el-input>
           </el-form-item>
 
-          <el-form-item>
+          <el-form-item prop="brief">
             <div>知识库简介</div>
             <el-input
               v-model="formCreate.brief"
@@ -236,7 +271,9 @@
           </el-row>
 
           <el-form-item>
-            <el-button style="width: 100%">新建</el-button>
+            <el-button style="width: 100%" @click="handleCreate"
+              >新建</el-button
+            >
           </el-form-item>
         </el-form>
 
@@ -375,24 +412,24 @@
                   v-model="tooltipVisible" -->
                   <template slot="content">
                     <!-- <div style="width: 50%"> -->
-                      <el-select
-                        v-model="selectedOption"
-                        placeholder="请选择"
-                        style="width: 100%"
-                      >
-                        <el-option
-                          v-for="option in tooltipOptions"
-                          :key="option.value"
-                          :label="option.label"
-                          :value="option.value"
-                        ></el-option>
-                      </el-select>
+                    <el-select
+                      v-model="selectedOption"
+                      placeholder="请选择"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="option in tooltipOptions"
+                        :key="option.value"
+                        :label="option.label"
+                        :value="option.value"
+                      ></el-option>
+                    </el-select>
 
-                      <el-input
-                        style="margin-top: 10px"
-                        v-model="input"
-                        placeholder="请输入内容"
-                      ></el-input>
+                    <el-input
+                      style="margin-top: 10px"
+                      v-model="input"
+                      placeholder="请输入内容"
+                    ></el-input>
                     <!-- </div> -->
                   </template>
                   <span @click.capture="headerClick">{{ column.label }}</span>
@@ -433,6 +470,39 @@
       </div>
     </div>
 
+    <div class="dropdown">
+      <span v-if="isReqLoading">
+        Running
+        <i class="el-icon-loading"></i>
+        Stop
+      </span>
+
+      <el-dropdown trigger="click">
+        <i class="el-icon-more" />
+        <el-dropdown-menu slot="dropdown">
+          <el-dropdown-item @click.native="handleRetrun">
+            Return R
+          </el-dropdown-item>
+          <el-dropdown-item>Settings</el-dropdown-item>
+          <el-dropdown-item @click.native="handlePrint">
+            Print
+          </el-dropdown-item>
+          <el-dropdown-item @click.native="handleRecord">
+            Record a screencast
+          </el-dropdown-item>
+          <el-dropdown-item @click.native="handleReport">
+            Report a bug
+          </el-dropdown-item>
+          <el-dropdown-item @click.native="handleHelp">
+            Get help
+          </el-dropdown-item>
+          <el-dropdown-item @click.native="handleAbout">
+            About
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </el-dropdown>
+    </div>
+
     <el-dialog v-model="dialogVisible" title="选择器" width="30%">
       <el-select v-model="selectedOption" placeholder="请选择">
         <el-option
@@ -452,11 +522,14 @@
 
 <script>
 import { v4 as uuidv4 } from "uuid";
-// import splitPane from "vue-splitpane";
+import splitPane from "vue-splitpane";
+
 export default {
-  // components: { splitPane },
+  components: { splitPane },
   data() {
     return {
+      article: "",
+      fullscreenLoading: true,
       activeNames: ["1"],
       activeNames2: "1",
       dialogMode: "1",
@@ -477,10 +550,10 @@ export default {
         { label: "OpenAI (Running)", value: "7" },
         { label: "Anthropic (Running)", value: "8" },
       ],
-      promptTemp: "1",
+      promptTemp: "default",
       promptTempOption: [
-        { label: "default", value: "1" },
-        { label: "py", value: "2" },
+        { label: "default", value: "default" },
+        { label: "py", value: "py" },
       ],
       // 对话数组
       messages: [
@@ -572,6 +645,15 @@ export default {
         { label: "text-embedding-ada-002", value: "20" },
       ],
 
+      rules: {
+        name: [
+          { required: true, message: "知识库名称不能为空", trigger: "blur" },
+        ],
+        brief: [
+          { required: true, message: "知识库简介不能为空", trigger: "blur" },
+        ],
+      },
+
       // 选择知识库
       formSelect: {
         textarea: "关于本项目issue的解答",
@@ -639,6 +721,8 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
 
       tooltipVisible: false,
       input: "",
+
+      isReqLoading: false,
     };
   },
 
@@ -720,6 +804,132 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
     this.socket.close();
   },
   methods: {
+    // 切换知识库管理
+    handleKnowledge() {
+      this.isDialog = false;
+    },
+    // 切换对话
+    handleChat() {
+      this.isDialog = true;
+    },
+
+    // 选择对话模式
+    handleDialogMode(val) {
+      this.isReqLoading = true;
+      setTimeout(() => {
+        this.isReqLoading = false;
+      }, 5000);
+
+      if (val == "1") {
+        this.promptTempOption = [
+          { label: "default", value: "default" },
+          { label: "py", value: "py" },
+        ];
+      } else if (val == "2") {
+        this.promptTempOption = [
+          { label: "default", value: "default" },
+          { label: "text", value: "text" },
+        ];
+      } else if (val == "3") {
+        this.promptTempOption = [
+          { label: "default", value: "default" },
+          { label: "search", value: "search" },
+        ];
+      } else if (val == "4") {
+        this.promptTempOption = [
+          { label: "chatGLM", value: "chatGLM" },
+          { label: "Qwen", value: "Qwen" },
+        ];
+      }
+    },
+
+    // 选择LLM模式
+    handleLLMMode(val) {
+      this.isReqLoading = true;
+      setTimeout(() => {
+        this.isReqLoading = false;
+      }, 5000);
+    },
+    // 选择prompt模版
+    handlePromptMode(val) {
+      this.isReqLoading = true;
+      setTimeout(() => {
+        this.isReqLoading = false;
+      }, 5000);
+
+      const h = this.$createElement;
+      this.$notify({
+        message: h(
+          "span",
+          { style: "color: black" },
+          "已切换成" + val + "模式"
+        ),
+        position: "bottom-right",
+      });
+    },
+
+    // Return
+    handleReturn() {},
+
+    // Record a screencast
+    handleRecord() {
+      this.$confirm(
+        "Due to liminations with some browsers, this feature is only supported on recent desktop versions of Chrome, Firefox, and Edge.",
+        "Record a screencast",
+        { type: "warning" }
+      )
+        .then(() => {
+          // this.$message({
+          //   type: "success",
+          //   message: "删除成功!",
+          // });
+        })
+        .catch(() => {
+          // this.$message({
+          //   type: "info",
+          //   message: "已取消删除",
+          // });
+        });
+    },
+    //  Report a bug
+    handleReport() {},
+    // 帮助
+    handleHelp() {},
+    // About
+    handleAbout() {
+      this.$confirm(
+        "Due to liminations with some browsers, this feature is only supported on recent desktop versions of Chrome, Firefox, and Edge.",
+        "About"
+        // { type: "warning" }
+      )
+        .then(() => {
+          // this.$message({
+          //   type: "success",
+          //   message: "删除成功!",
+          // });
+        })
+        .catch(() => {
+          // this.$message({
+          //   type: "info",
+          //   message: "已取消删除",
+          // });
+        });
+    },
+    // Print
+    handlePrint() {
+      import("./content.js").then((data) => {
+        const { title } = data.default;
+        document.title = title;
+        this.article = data.default;
+        setTimeout(() => {
+          this.fullscreenLoading = false;
+          this.$nextTick(() => {
+            window.print();
+          });
+        }, 3000);
+      });
+    },
+
     // 左侧面板切换
     toggleSidebar() {
       this.collapsed = !this.collapsed;
@@ -731,6 +941,22 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
         this.visibility = "visible";
       }
     },
+
+    // 新建知识库
+    handleCreate() {
+      this.$refs["formCreate"].validate((valid) => {
+        if (valid) {
+          this.isReqLoading = true;
+          setTimeout(() => {
+            this.isReqLoading = false;
+          }, 5000);
+        } else {
+          console.log("error submit!!");
+          return false;
+        }
+      });
+    },
+
     // 清空对话
     handleClear() {
       this.messages = [];
@@ -818,46 +1044,11 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
         seconds
       );
     },
-    // 切换知识库管理
-    handleKnowledge() {
-      this.isDialog = false;
-    },
-    // 切换对话
-    handleChat() {
-      this.isDialog = true;
-    },
+
     // 滑块格式化
     formatTooltip(val) {
       return val / 100;
     },
-    // 选择对话模式
-    handleDialogMode(val) {
-      if (val == "1") {
-        this.promptTempOption = [
-          { label: "default", value: "1" },
-          { label: "py", value: "2" },
-        ];
-      } else if (val == "2") {
-        this.promptTempOption = [
-          { label: "default", value: "1" },
-          { label: "text", value: "2" },
-        ];
-      } else if (val == "3") {
-        this.promptTempOption = [
-          { label: "default", value: "1" },
-          { label: "search", value: "2" },
-        ];
-      } else if (val == "4") {
-        this.promptTempOption = [
-          { label: "chatGLM", value: "1" },
-          { label: "Qwen", value: "2" },
-        ];
-      }
-    },
-    // 选择LLM模式
-    handleLLMMode(val) {},
-    // 选择prompt模版
-    handlePromptMode(val) {},
 
     // 选择或新建知识库
     handleSelectOrCreate(val) {
@@ -982,7 +1173,7 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
     flex-direction: column;
     justify-content: flex-start;
     margin-left: 10px;
-    margin-top: 10px;
+    margin-top: 50px;
     height: 100%;
     overflow-y: auto;
     .message {
@@ -1002,7 +1193,7 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
         display: block;
         text-align: left;
         margin-right: 30px;
-        max-width: 50%;
+        max-width: 100%;
         margin-left: auto;
       }
       .bot-message {
@@ -1103,5 +1294,17 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
 
 .leftCollapse ::v-deep .el-collapse-item__header {
   background-color: #f2f2f2;
+}
+
+.dropdown {
+  position: fixed;
+  top: 65px;
+  right: 50px;
+  z-index: 9999;
+  .el-dropdown {
+    margin-left: 10px;
+    font-size: 25px;
+    cursor: pointer;
+  }
 }
 </style>
