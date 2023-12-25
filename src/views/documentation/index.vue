@@ -159,42 +159,8 @@
         <i :class="collapsed ? 'el-icon-arrow-right' : 'el-icon-arrow-left'" />
       </button>
 
-      <div v-if="isDialog" class="dialog">
-        <!-- 对话区 -->
-        <div class="main">
-          <!-- 信息 -->
-          <div v-for="message in messages" :key="message.id" class="message">
-            <img v-if="!message.isFromUser" src="../../../public/chat.png" />
-            <img v-else src="../../../public/personal.png" />
-            <span
-              id="content"
-              :class="{
-                'user-message content': message.isFromUser,
-                'error-message content': message.isError && !message.isFromUser, // 当 error 为 true 时添加红色框样式
-                'bot-message content': !message.isFromUser,
-              }"
-            >
-              <div style="color: grey">{{ message.currentTime }}</div>
-              <br />
-              {{ message.text }}
-            </span>
-          </div>
-        </div>
 
-        <!-- 输入框 -->
-        <div class="input-container">
-          <el-input
-            v-model="userInput"
-            size="medium"
-            type="text"
-            :disabled="isInput"
-            placeholder="请输入对话内容，换行请使用Shift+Enter"
-            @keyup.enter.native="sendMessage"
-          >
-            <i slot="suffix" class="el-icon-s-promotion el-input__icon" />
-          </el-input>
-        </div>
-      </div>
+      <Dialog v-if="isDialog"/>
 
       <div v-else class="kb">
         <el-form ref="formKB" :model="formKB" style="width: 70%">
@@ -522,10 +488,89 @@
 
 <script>
 import { v4 as uuidv4 } from "uuid";
-import splitPane from "vue-splitpane";
+import Dialog from "./components/Dialog.vue";
 
 export default {
-  components: { splitPane },
+  components: { Dialog },
+
+  mounted() {
+    this.currentTime = this.formatDateTime(new Date());
+    // 在组件被挂载后，初始化 WebSocket 连接
+    this.socket = new WebSocket("ws://localhost:3000");
+    // console.log("before open", this.socket.readyState); // 0
+    this.socket.onopen = () => {
+      console.log("WebSocket connected");
+      this.status = "connected";
+    };
+    this.socket.onclose = () => {
+      console.log("WebSocket disconnected");
+      this.status = "disconnected";
+    };
+    this.socket.onmessage = (event) => {
+      // 处理文本
+      const message = event.data.toString();
+      if (message.includes("输入错误")) {
+        this.isError = true; // 输入信息包含特定词语，设置 error 为 true
+      } else {
+        this.isError = false; // 输入信息正确，设置 error 为 false
+      }
+      this.currentTime = this.formatDateTime(new Date());
+
+      // 推送框
+      this.newMessage = {
+        isFromUser: false,
+        text: "",
+        id: uuidv4(),
+        currentTime: this.currentTime,
+        isError: this.isError,
+      };
+      this.messages.push(this.newMessage);
+
+      // 定义每个字符的打印间隔（毫秒）
+      var delay = 300;
+      // 定义当前已经打印的字符数
+      var index = 0;
+
+      // 每隔 delay 毫秒输出一个字符
+      var timer = setInterval(() => {
+        // console.log(this);
+        // 获取前 index 个字符
+        var output = message.substring(0, index);
+        // console.log(output)
+
+        // 获取 message 类名下面的所有 div 元素
+        var divs = document.querySelectorAll(".message span");
+
+        // 获取最后一个 div 元素
+        var lastDiv = divs[divs.length - 1];
+
+        // 在页面上显示输出结果
+        var timeText = `
+          <div style="color: grey">${this.currentTime}</div>
+          <br />
+        `;
+        lastDiv.innerHTML = timeText + output;
+
+        // 如果已经输出完所有字符，则清除定时器
+        if (index >= message.length) {
+          this.isInput = false;
+          this.messages[this.messages.length - 1] = {
+            ...this.newMessage,
+            text: message,
+          };
+          clearInterval(timer);
+          // console.log(this.messages[this.messages.length - 1]);
+        }
+        // 增加已经输出的字符数
+        index++;
+      }, delay);
+    };
+  },
+  beforeDestroy() {
+    // 在组件销毁之前，关闭 WebSocket 连接
+    this.socket.close();
+  },
+
   data() {
     return {
       article: "",
@@ -726,83 +771,6 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
     };
   },
 
-  mounted() {
-    this.currentTime = this.formatDateTime(new Date());
-    // 在组件被挂载后，初始化 WebSocket 连接
-    this.socket = new WebSocket("ws://localhost:3000");
-    // console.log("before open", this.socket.readyState); // 0
-    this.socket.onopen = () => {
-      console.log("WebSocket connected");
-      this.status = "connected";
-    };
-    this.socket.onclose = () => {
-      console.log("WebSocket disconnected");
-      this.status = "disconnected";
-    };
-    this.socket.onmessage = (event) => {
-      // 处理文本
-      const message = event.data.toString();
-      if (message.includes("输入错误")) {
-        this.isError = true; // 输入信息包含特定词语，设置 error 为 true
-      } else {
-        this.isError = false; // 输入信息正确，设置 error 为 false
-      }
-      this.currentTime = this.formatDateTime(new Date());
-
-      // 推送框
-      this.newMessage = {
-        isFromUser: false,
-        text: "",
-        id: uuidv4(),
-        currentTime: this.currentTime,
-        isError: this.isError,
-      };
-      this.messages.push(this.newMessage);
-
-      // 定义每个字符的打印间隔（毫秒）
-      var delay = 300;
-      // 定义当前已经打印的字符数
-      var index = 0;
-
-      // 每隔 delay 毫秒输出一个字符
-      var timer = setInterval(() => {
-        // console.log(this);
-        // 获取前 index 个字符
-        var output = message.substring(0, index);
-        // console.log(output)
-
-        // 获取 message 类名下面的所有 div 元素
-        var divs = document.querySelectorAll(".message span");
-
-        // 获取最后一个 div 元素
-        var lastDiv = divs[divs.length - 1];
-
-        // 在页面上显示输出结果
-        var timeText = `
-          <div style="color: grey">${this.currentTime}</div>
-          <br />
-        `;
-        lastDiv.innerHTML = timeText + output;
-
-        // 如果已经输出完所有字符，则清除定时器
-        if (index >= message.length) {
-          this.isInput = false;
-          this.messages[this.messages.length - 1] = {
-            ...this.newMessage,
-            text: message,
-          };
-          clearInterval(timer);
-          // console.log(this.messages[this.messages.length - 1]);
-        }
-        // 增加已经输出的字符数
-        index++;
-      }, delay);
-    };
-  },
-  beforeDestroy() {
-    // 在组件销毁之前，关闭 WebSocket 连接
-    this.socket.close();
-  },
   methods: {
     // 切换知识库管理
     handleKnowledge() {
