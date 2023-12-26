@@ -1,49 +1,50 @@
 <template>
-      <!-- <div v-if="isDialog" class="dialog"> -->
-      <div class="dialog">
-        <!-- 对话区 -->
-        <div class="main">
-          <!-- 信息 -->
-          <div v-for="message in messages" :key="message.id" class="message">
-            <img v-if="!message.isFromUser" src="../../../../public/chat.png" />
-            <img v-else src="../../../../public/personal.png" />
-            <span
-              id="content"
-              :class="{
-                'user-message content': message.isFromUser,
-                'error-message content': message.isError && !message.isFromUser, // 当 error 为 true 时添加红色框样式
-                'bot-message content': !message.isFromUser,
-              }"
-            >
-              <div style="color: grey">{{ message.currentTime }}</div>
-              <br />
-              {{ message.text }}
-            </span>
-          </div>
-        </div>
-
-        <!-- 输入框 -->
-        <div class="input-container">
-          <el-input
-            v-model="userInput"
-            size="medium"
-            type="text"
-            :disabled="isInput"
-            placeholder="请输入对话内容，换行请使用Shift+Enter"
-            @keyup.enter.native="sendMessage"
-          >
-            <i slot="suffix" class="el-icon-s-promotion el-input__icon" />
-          </el-input>
-        </div>
+  <!-- <div v-if="isDialog" class="dialog"> -->
+  <div class="dialog">
+    <!-- 对话区 -->
+    <div class="main">
+      <!-- 信息 -->
+      <div v-for="message in messages" :key="message.id" class="message">
+        <img v-if="!message.isFromUser" src="../../../../public/chat.png" />
+        <img v-else src="../../../../public/personal.png" />
+        <span
+          id="content"
+          :class="{
+            'user-message content': message.isFromUser,
+            'error-message content': message.isError && !message.isFromUser, // 当 error 为 true 时添加红色框样式
+            'bot-message content': !message.isFromUser,
+          }"
+        >
+          <div style="color: grey">{{ message.currentTime }}</div>
+          <br />
+          {{ message.text }}
+        </span>
       </div>
+    </div>
+
+    <!-- 输入框 -->
+    <div class="input-container">
+      <el-input
+        v-model="userInput"
+        size="medium"
+        type="text"
+        :disabled="isInput"
+        placeholder="请输入对话内容，换行请使用Shift+Enter"
+        @keyup.enter.native="sendMessage"
+      >
+        <i slot="suffix" class="el-icon-s-promotion el-input__icon" />
+      </el-input>
+    </div>
+  </div>
 </template>
 
 <script>
 import { v4 as uuidv4 } from "uuid";
 
 export default {
-  components: { },
-  
+  components: {},
+  props: ["messages"],
+
   mounted() {
     this.currentTime = this.formatDateTime(new Date());
     // 在组件被挂载后，初始化 WebSocket 连接
@@ -124,88 +125,52 @@ export default {
 
   data() {
     return {
-      article: "",
-      fullscreenLoading: true,
-      activeNames: ["1"],
-      activeNames2: "1",
-      dialogMode: "1",
       // 对话数组
-      messages: [
-        {
-          text: "今天星期几",
-          index: "001",
-          isFromUser: true,
-          currentTime: this.formatDateTime(new Date()),
-          isError: false,
-        },
-        {
-          text: "明天会下雨吗",
-          index: "002",
-          isFromUser: true,
-          currentTime: this.formatDateTime(new Date()),
-          isError: false,
-        },
-        {
-          text: "第一个登上月球的人叫什么",
-          index: "003",
-          isFromUser: true,
-          currentTime: this.formatDateTime(new Date()),
-          isError: false,
-        },
-        {
-          text: "^_^ @_@",
-          index: "004",
-          isFromUser: false,
-          currentTime: this.formatDateTime(new Date()),
-          isError: false,
-        },
-      ],
-
-      // isDialog: true,
-      isDialog: false,
-      sidebarWidth: 500,
-      collapsed: false,
-      visibility: "visible",
+      // messages: [
+      //   {
+      //     text: "今天星期几",
+      //     index: "001",
+      //     isFromUser: true,
+      //     currentTime: this.formatDateTime(new Date()),
+      //     isError: false,
+      //   },
+      //   {
+      //     text: "明天会下雨吗",
+      //     index: "002",
+      //     isFromUser: true,
+      //     currentTime: this.formatDateTime(new Date()),
+      //     isError: false,
+      //   },
+      //   {
+      //     text: "第一个登上月球的人叫什么",
+      //     index: "003",
+      //     isFromUser: true,
+      //     currentTime: this.formatDateTime(new Date()),
+      //     isError: false,
+      //   },
+      //   {
+      //     text: "^_^ @_@",
+      //     index: "004",
+      //     isFromUser: false,
+      //     currentTime: this.formatDateTime(new Date()),
+      //     isError: false,
+      //   },
+      // ],
       userInput: "",
       socket: null,
       status: "disconnected",
       newMessage: "",
       isInput: false,
       currentTime: "",
-      sliderValue: 45,
-      marks: { 0: "0.00", 100: "1.00" },
-      roundsValue: 3,
-
-      // 选择或新建知识库
-      formKB: {
-        knowledge: "1",
-      },
-      isCreate: false,
-      // 新建知识库
-      formCreate: {
-        name: "",
-        brief: "",
-        maxlength: 250,
-        overlength: 50,
-      },
-      rules: {
-        name: [
-          { required: true, message: "知识库名称不能为空", trigger: "blur" },
-        ],
-        brief: [
-          { required: true, message: "知识库简介不能为空", trigger: "blur" },
-        ],
-      },
-
       input: "",
     };
   },
 
   methods: {
-
     // 清空对话
     handleClear() {
       this.messages = [];
+      // this.$emit("clear-dialog", []);
     },
     // 导出对话
     handleExport() {
@@ -229,7 +194,6 @@ export default {
       link.click();
       document.body.removeChild(link);
     },
-
     // 发送信息
     async sendMessage() {
       if (this.userInput.trim()) {
