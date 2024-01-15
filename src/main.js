@@ -20,6 +20,22 @@ import './utils/error-log' // error log
 
 import * as filters from './filters' // global filters
 
+// import VueMarkdownEditor from '@kangc/v-md-editor'
+// import '@kangc/v-md-editor/lib/style/base-editor.css'
+// import vuepressTheme from '@kangc/v-md-editor/lib/theme/vuepress.js'
+// import '@kangc/v-md-editor/lib/theme/style/vuepress.css'
+
+// import Prism from 'prismjs'
+
+// VueMarkdownEditor.use(vuepressTheme, {
+//   Prism
+// })
+
+// Vue.use(VueMarkdownEditor)
+
+import highlightPlugin from '@highlightjs/vue-plugin'
+import 'highlight.js/styles/dark.css'
+Vue.use(highlightPlugin)
 /**
  * If you don't want to use mock-server
  * you want to use MockJs for mock api
