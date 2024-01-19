@@ -277,6 +277,16 @@ import { v4 as uuidv4 } from "uuid";
 import Dialog from "./components/Dialog.vue";
 import Form from "./components/Form.vue";
 import ThemePicker from "@/components/ThemePicker";
+import { getServerConfig, getServerSeo } from "@/api/server";
+import {
+  listRunningModels,
+  listConfigModels,
+  getModeConfig,
+  stopMode,
+  changeMode,
+  llmModeFast,
+  llmModeChain,
+} from "@/api/llm-mode";
 
 export default {
   components: {
@@ -287,6 +297,79 @@ export default {
 
   mounted() {
     this.handleDrag(20);
+
+    listRunningModels({
+      controller_address: "http://127.0.0.1:20001", // Fastchat controller服务器地址
+      placeholder: "string",
+    }).then((res) => {
+      console.log(res);
+    });
+
+    listConfigModels().then((res) => {
+      console.log(res);
+    });
+
+    getModeConfig({
+      model_name: "gpt2-xl",
+      placeholder: "string",
+    }).then((res) => {
+      console.log(res);
+    });
+
+    stopMode({
+      model_name: "Qwen-14B-Chat-Int4",
+      controller_address: "http://127.0.0.1:20001",
+    }).then((res) => {
+      console.log(res);
+    });
+
+    changeMode({
+      model_name: "Qwen-14B-Chat-Int4",
+      new_model_name: "Qwen-14B-Chat-Int4",
+      controller_address: "http://127.0.0.1:20001",
+    }).then((res) => {
+      console.log(res);
+    });
+
+    // 与llm模型对话(直接与fastchat api对话)
+    llmModeFast({
+      model: "Qwen-14B-Chat-Int4", // 模型名称
+      messages: [
+        // 用户输入
+        {
+          role: "user",
+          content: "hello",
+        },
+      ],
+      temperature: 0.7, //LLM 采样温度
+      n: 1,
+      max_tokens: 0, //限制LLM生成Token数量
+      stop: [],
+      stream: false,
+      presence_penalty: 0,
+      frequency_penalty: 0,
+    });
+
+    // 与llm模型对话(通过LLMChain)
+    llmModeChain({
+      query: "恼羞成怒", //本次输入
+      history: [
+        // 历史对话
+        {
+          role: "user",
+          content: "我们来玩成语接龙，我先来，生龙活虎",
+        },
+        {
+          role: "assistant",
+          content: "虎头虎脑",
+        },
+      ],
+      stream: false, //是否流式输出
+      model_name: "Qwen-14B-Chat-Int4", //模型名称
+      temperature: 0.7, //采样温度
+      max_tokens: 0, // 返回token数
+      prompt_name: "default", // 使用模板
+    });
   },
 
   data() {
@@ -328,7 +411,7 @@ export default {
       isReqLoading: false,
 
       // isDialog: true, // 右侧内容默认是对话
-      isDialog: false,  // 右侧内容默认是表单
+      isDialog: false, // 右侧内容默认是表单
 
       sidebarWidth: 500,
       collapsed: false,
@@ -352,18 +435,18 @@ export default {
       sliderKnow: 45,
       // 搜索引擎匹配
       searchOptions: [
-        {
-          value: "bing",
-          label: "bing",
-        },
-        {
-          value: "duckduckgo",
-          label: "duckduckgo",
-        },
-        {
-          value: "metaphor",
-          label: "metaphor",
-        },
+        // {
+        //   value: "bing",
+        //   label: "bing",
+        // },
+        // {
+        //   value: "duckduckgo",
+        //   label: "duckduckgo",
+        // },
+        // {
+        //   value: "metaphor",
+        //   label: "metaphor",
+        // },
       ],
       searchValue: "duckduckgo",
       roundsSearch: 3,
@@ -542,6 +625,12 @@ export default {
           { label: "default", value: "default" },
           { label: "search", value: "search" },
         ];
+
+        getServerSeo().then((res) => {
+          this.searchOptions = res.map((item) => {
+            return { value: item, label: item };
+          });
+        });
       } else if (val == "自定义Agent问答") {
         this.promptTempOption = [
           { label: "chatGLM", value: "chatGLM" },

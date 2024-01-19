@@ -1,7 +1,7 @@
 <template>
   <div class="dialog" :style="customStyle">
     <!-- <v-md-editor v-model="text" height="400px"></v-md-editor> -->
-      <highlightjs language="javascript" :code="code"></highlightjs>
+      <!-- <highlightjs language="javascript" :code="code"></highlightjs> -->
     <!-- <code>
       let a =10;
     </code> -->

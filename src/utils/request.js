@@ -22,6 +22,8 @@ service.interceptors.request.use(
       config.headers['X-Token'] = getToken()
       // config.headers['Content-Type'] = 'application/json'
       config.headers['Cache-Control'] = 'no-cache'
+      config.headers['Accept'] = 'application/json'
+      config.headers['Content-Type'] = 'application/json'
     }
     return config
   },

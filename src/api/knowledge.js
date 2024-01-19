@@ -1,5 +1,4 @@
 import request from '@/utils/request'
-// import axios from "axios"
 
 // 获取知识库列表
 export function getKbList(params) {
@@ -134,3 +133,22 @@ export function downloadFile(params) {
   })
 }
 
+// 根据content中文档重建向量库，流式输出处理进度。
+/*
+{
+  "knowledge_base_name": "samples",
+  "allow_empty_kb": true,
+  "vs_type": "faiss",
+  "embed_model": "m3e-base",
+  "chunk_size": 250,
+  "chunk_overlap": 50,
+  "zh_title_enhance": false,
+  "not_refresh_vs_cache": false
+} */
+export function recreateVectorStore(data) {
+  return request({
+    url: '/knowledge_base/recreate_vector_store',
+    method: 'post',
+    data
+  })
+}

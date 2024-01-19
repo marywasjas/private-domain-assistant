@@ -95,14 +95,12 @@
         <el-upload
           ref="upload"
           drag
-          show-file-list
+          :show-file-list="true"
           action="#"
           :file-list="fileList"
           :auto-upload="true"
           :before-upload="handleBeforeUpload"
           :on-remove="handleRemove"
-          :on-success="handleSuccess"
-          :on-error="handleError"
           :on-exceed="handleExceed"
           :headers="headers"
           :http-request="httpRequest"
@@ -112,17 +110,17 @@
           <div style="text-align: left; width: auto">
             <strong>Drag and drop files here</strong><br />
             <div style="font-size: 16px">
-              Limit 200MB per file ·
+              Limit 200MB per file·
               HTML,MD,JSON,CSV,PDF,PNG,JPG,JPEG,BMP,EML,MSG,RST,RTF,
               TXT,XML,DOCX,EPUB,ODT,PPT,PPTX,TSV,HTM
             </div>
           </div>
-        </el-upload>
-        <div style="">
+          <!-- <div style="">
           <el-button style="margin: 0 20px" type="text" @click="confirmUpload">
             Browse flies
           </el-button>
-        </div>
+        </div> -->
+        </el-upload>
       </el-form-item>
 
       <el-form-item>
@@ -176,7 +174,7 @@
         </el-collapse>
       </el-form-item>
 
-      <el-button :disabled="isUpload" @click="handleAdd">
+      <el-button :disabled="isUpload" @click="confirmUpload">
         添加文件到知识库
       </el-button>
 
@@ -310,7 +308,7 @@
 </template>
 
 <script>
-import { v4 as uuidv4 } from "uuid";
+// import { v4 as uuidv4 } from "uuid";
 import {
   getKbList, // 获取知识库列表
   createKb, // 创建知识库
@@ -322,6 +320,7 @@ import {
   updateKbFile, // 更新现有文件到数据库
   downloadFile, // 下载对应的知识文件
   searchKb, // 搜索知识库
+  recreateVectorStore,
 } from "@/api/knowledge";
 
 export default {
@@ -336,14 +335,14 @@ export default {
       nameTable: "",
       formKB: {},
       createOptions: [
-        {
-          label: "samples",
-          value: "samples",
-        },
-        {
-          label: "新建知识库",
-          value: "新建知识库",
-        },
+        // {
+        //   label: "samples",
+        //   value: "samples",
+        // },
+        // {
+        //   label: "新建知识库",
+        //   value: "新建知识库",
+        // },
       ],
       isCreate: false, // 默认是非创建页面
       formCreate: {
@@ -479,7 +478,7 @@ export default {
 
       isLoading: false,
 
-      isUpload: false,
+      isUpload: true,
 
       isSelected: true,
 
@@ -490,15 +489,27 @@ export default {
   watch: {},
 
   created() {
-    console.log("CREATE");
+    console.log("created------------------");
     // 获取知识库列表
     this.getList();
 
-    if (this.fileList.length == 0) {
-      this.isUpload = true;
-    } else {
-      this.isUpload = false;
-    }
+    searchKb({
+      query: "chat",
+      knowledge_base_name: "eat",
+      top_k: 3,
+      score_threshold: 1,
+    });
+
+    recreateVectorStore({
+      knowledge_base_name: "samples",
+      allow_empty_kb: true,
+      vs_type: "faiss",
+      embed_model: "m3e-base",
+      chunk_size: 250,
+      chunk_overlap: 50,
+      zh_title_enhance: false,
+      not_refresh_vs_cache: false,
+    });
   },
 
   methods: {
@@ -510,6 +521,7 @@ export default {
       getKbList()
         .then((res) => {
           res.push("新建知识库");
+
           this.createOptions = res.map((item) => {
             return { label: item, value: item };
           });
@@ -518,12 +530,10 @@ export default {
             this.isCreate = false;
             this.formKB.knowledge = this.createOptions[0].value;
             this.nameKB = this.createOptions[0].value;
-            this.handleFileList(this.createOptions[0].value);
             this.formSelect.textarea = `关于 ${this.nameKB} 的简介`;
-            // 查找第一个出现(索引
-            // var index = this.formKB.knowledge.indexOf("(");
-            // 截取字符串
-            // var result = this.formKB.knowledge.slice(0, index);
+            this.handleFileList(this.createOptions[0].value);
+
+            console.log(this.createOptions);
           } else {
             this.isCreate = true;
           }
@@ -533,24 +543,24 @@ export default {
 
     // 新建知识库
     handleCreate() {
-      console.log(this.formCreate);
+      // console.log(this.formCreate);
       this.$refs["formCreate"].validate((valid) => {
         if (valid) {
-          createKb(this.formCreate)
-            .then((res) => {
-              this.getList();
-              this.isCreate = false;
-              // this.handleSend(knowOptions);
+          delete this.formCreate.brief;
+          let res =JSON.stringify(this.formCreate)
+          createKb(res).then((res) => {
+            this.getList();
+            this.isCreate = false;
+            // this.handleSend(knowOptions);
 
-              // 初始化创建表单
-              this.formCreate = {
-                knowledge_base_name: "",
-                brief: "",
-                vector_store_type: "faiss",
-                embed_model: "ernie-tiny",
-              };
-            })
-            .catch(() => {});
+            // 初始化创建表单
+            this.formCreate = {
+              knowledge_base_name: "",
+              brief: "",
+              vector_store_type: "faiss",
+              embed_model: "ernie-tiny",
+            };
+          });
         } else {
           console.log("error submit!!");
           return false;
@@ -560,39 +570,39 @@ export default {
 
     // 获取知识库文件
     handleFileList(name) {
-      getKbFileList({ knowledge_base_name: name })
-        .then((res) => {
-          this.tableData = res.map((item) => {
-            return { name: item };
-          });
+      getKbFileList({ knowledge_base_name: name }).then((res) => {
+        this.tableData = res.map((item) => {
+          return { name: item };
+        });
 
-          if (this.tableData.length == 0) {
-            this.nameTable = "知识库暂时没有文件";
-          } else {
-            this.nameTable =
-              "知识库中包含源文件和向量库，请从下表中选择文件后操作";
-          }
-        })
-        .catch(() => {});
+        if (this.tableData.length == 0) {
+          this.nameTable = "知识库暂时没有文件";
+        } else {
+          this.nameTable =
+            "知识库中包含源文件和向量库，请从下表中选择文件后操作";
+        }
+      });
     },
 
     // 更新知识库介绍
     handleUpdateInfo(evt) {
-      // console.log(evt.target.value);
       updateKbInfo({
         knowledge_base_name: this.formKB.knowledge,
         kb_info: evt.target.value,
-      })
-        .then((res) => {})
-        .catch(() => {});
+      }).then((res) => {});
     },
 
     // 选择或新建知识库
     handleSelectOrCreate(val) {
+      console.log(val);
       if (val == "新建知识库") {
         this.isCreate = true;
       } else {
-        this.getList();
+        // this.getList();
+        this.handleFileList(val);
+        this.formKB.knowledge = val;
+        this.nameKB = val;
+        this.formSelect.textarea = `关于 ${this.nameKB} 的简介`;
         this.isCreate = false;
       }
     },
@@ -606,6 +616,7 @@ export default {
       }
     },
 
+    // 删除知识库文件
     handleDelete() {
       let files = this.selectedArray.map((item) => {
         return item.name;
@@ -616,11 +627,9 @@ export default {
         file_names: files,
         delete_content: false, // 是否从知识库删除
         not_refresh_vs_cache: false, // 是否从向量库删除
-      })
-        .then((res) => {
-          this.handleFileList(this.formKB.knowledge);
-        })
-        .catch(() => {});
+      }).then((res) => {
+        this.handleFileList(this.formKB.knowledge);
+      });
 
       if (this.tableData.length == 0) {
         this.nameTable = "知识库暂时没有文件";
@@ -630,51 +639,24 @@ export default {
     },
 
     handleDeleteKB() {
-      deleteKb({ knowledge_base_name: this.formKB.knowledge })
-        .then((res) => {
-          this.getList();
-        })
-        .catch(() => {});
-    },
-
-    // 添加文件到知识库
-    // handleAdd() {
-    handleBeforeUpload() {
-      
-      let files = this.fileList.map((item) => {
-        return item.name;
+      deleteKb({ knowledge_base_name: this.formKB.knowledge }).then((res) => {
+        this.getList();
+        this.isCreate = true;
       });
-
-      updateKbFile({
-        file_names: files,
-        knowledge_base_name: this.formKB.knowledge,
-        chunk_size: this.formSelect.maxlength,
-        chunk_overlap: this.formSelect.overlength,
-        zh_title_enhance: this.formSelect.checked,
-        override_custom_docs: false,
-        docs: "{}",
-        not_refresh_vs_cache: false,
-      })
-        .then(() => {})
-        .catch(() => {});
-
-      if (this.tableData.length == 0) {
-        this.nameTable = "知识库暂时没有文件";
-      } else {
-        this.nameTable = "知识库中包含源文件和向量库，请从下表中选择文件后操作";
-      }
-
-      this.fileList = [];
-      this.isUpload = true;
     },
 
     // 下载选中文档
     handleLoad(fileName, fileContent) {
-      let url = `http://192.168.6.108:7861/knowledge_base/download_doc?knowledge_base_name=${
-        this.formKB.knowledge
-      }&file_name=${"record.txt"}&preview=${false}`;
+      if (this.selectedArray.length > 1) {
+        this.$message.warning("请选择一个下载文档");
+      } else {
+        let url = `http://192.168.11.108:7861/knowledge_base/download_doc?knowledge_base_name=${
+          this.formKB.knowledge
+        }&file_name=${this.selectedArray[0].name}&preview=${false}`;
 
-      window.open(url);
+        window.open(url);
+      }
+
       // downloadFile({
       //   knowledge_base_name: this.formKB.knowledge,
       //   file_name: "test.txt",
@@ -697,18 +679,24 @@ export default {
       // document.body.removeChild(element);
     },
 
+    // 自定义上传方法
     httpRequest(obj) {
+      // console.log("@");
+      this.fileList = [];
       this.fileList.push(obj);
     },
 
-    // 上传文件之前的钩子，参数为上传的文件，若返回 false 或者返回 Promise 且被 reject，则停止上传。
+    // 上传文件之前的钩子，参数为上传的文件
     handleBeforeUpload(file) {
       console.log("上传的文件", file);
+      this.fileList.push(file);
 
-      // var uploadFormData = new FormData();
-      // uploadFormData.append("file", file);
-      // uploadFormData.append("fileName", "file");
-      // this.fileList.push(uploadFormData);
+      this.isUpload = false;
+      const isLt200M = file.size / 1024 / 1024 < 200;
+      if (!isLt200M) {
+        this.$message.error("文件大小超过200MB限制");
+        return false;
+      }
     },
 
     confirmUpload() {
@@ -721,14 +709,13 @@ export default {
           },
         ],
       });
-      // 使用form表单的数据格式
+
       const params = new FormData();
-      // 将上传文件数组依次添加到参数paramsData中
+
       this.fileList.forEach((item) => {
         params.append("files", item.file);
       });
 
-      // 将输入表单数据添加到params表单中
       params.append("knowledge_base_name", this.formKB.knowledge);
       params.append("override", false);
       params.append("to_vector_store", false);
@@ -738,9 +725,15 @@ export default {
       params.append("docs", doc);
       params.append("not_refresh_vs_cache", false);
 
-      console.log(params.file);
-
-      uploadKbFile(params).then((res) => {});
+      uploadKbFile(params)
+        .then((res) => {
+          this.$message.success("上传成功！");
+          this.isUpload = true;
+          this.fileList = [];
+        })
+        .catch(() => {
+          this.$message.error("上传失败！");
+        });
     },
 
     handleExceed() {
@@ -749,18 +742,7 @@ export default {
 
     //	文件列表移除文件时的钩子
     handleRemove(file, fileList) {
-      // console.log(file);
-      // console.log(fileList);
-    },
-
-    // 文件上传失败时的钩子
-    handleError(err, file, fileList) {
-      // this.$message.error("上传失败！");
-    },
-
-    // 文件上传成功时的钩子
-    handleSuccess(response, file, fileList) {
-      // console.log(response);
+      this.isUpload = true;
     },
 
     handleTableClick(column) {
@@ -775,9 +757,36 @@ export default {
     handleRestart() {
       this.isLoading = true; // 点击按钮后显示提示信息
 
-      setTimeout(() => {
-        this.isLoading = false; // 5秒后隐藏提示信息
-      }, 5000);
+      var doc = JSON.stringify({
+        "test.txt": [
+          {
+            page_content: "custom doc",
+            metadata: {},
+            type: "Document",
+          },
+        ],
+      });
+
+      let files = this.selectedArray.map((item) => {
+        return item.name;
+      });
+
+      updateKbFile({
+        file_names: files,
+        knowledge_base_name: this.formKB.knowledge,
+        chunk_size: this.formSelect.maxlength,
+        chunk_overlap: this.formSelect.overlength,
+        zh_title_enhance: this.formSelect.checked,
+        override_custom_docs: false,
+        docs: doc,
+        not_refresh_vs_cache: false,
+      })
+        .then(() => {
+          this.isLoading = false;
+        })
+        .catch(() => {
+          this.isLoading = false;
+        });
     },
   },
 };
