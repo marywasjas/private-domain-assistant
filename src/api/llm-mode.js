@@ -1,12 +1,6 @@
 import request from '@/utils/request'
 
 // 列出当前已加载模型
-/*
-{
-  "controller_address": "http://127.0.0.1:20001", // Fastchat controller服务器地址
-  "placeholder": "string"
-}
-*/
 export function listRunningModels(data) {
   return request({
     url: '/llm_model/list_running_models',
@@ -24,13 +18,7 @@ export function listConfigModels(data) {
   })
 }
 
-//  获取模型配置（合并后）
-/*
-{
-  "model_name": "gpt2-xl",  模型名称
-  "placeholder": "string"
-}
-*/
+// 获取模型配置（合并后）
 export function getModeConfig(data) {
   return request({
     url: '/llm_model/get_model_config',
@@ -70,6 +58,24 @@ export function llmModeFast(data) {
 export function llmModeChain(data) {
   return request({
     url: '/chat/chat',
+    method: 'post',
+    data
+  })
+}
+
+// 与agent对话
+export function agentChat(data) {
+  return request({
+    url: '/chat/agent_chat',
+    method: 'post',
+    data
+  })
+}
+
+// 与搜索引擎对话
+export function searchChat(data) {
+  return request({
+    url: '/chat/search_engine_chat',
     method: 'post',
     data
   })

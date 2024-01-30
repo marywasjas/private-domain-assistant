@@ -83,12 +83,13 @@
     </el-form>
 
     <!-- 选择 -->
+    <!-- v-if="!isCreate && createOptions.length > 1" -->
     <el-form
       :key="2"
-      v-if="!isCreate && createOptions.length > 1"
       ref="formSelect"
       :model="formSelect"
       style="width: 70%"
+      v-if="!isCreate && createOptions.length > 1"
     >
       <el-form-item>
         <div style="font-size: 18px">上传知识文件：</div>
@@ -96,15 +97,15 @@
           ref="upload"
           drag
           :show-file-list="true"
-          action="#"
-          :file-list="fileList"
           :auto-upload="true"
+          :limit="1"
+          :file-list="fileList"
+          :headers="headers"
+          action="#"
           :before-upload="handleBeforeUpload"
+          :http-request="httpRequest"
           :on-remove="handleRemove"
           :on-exceed="handleExceed"
-          :headers="headers"
-          :http-request="httpRequest"
-          :limit="1"
         >
           <i class="el-icon-upload" style="margin: 0 20px"></i>
           <div style="text-align: left; width: auto">
@@ -200,7 +201,7 @@
         style="width: 100%"
         @selection-change="handleSelectionChange"
       >
-        <el-table-column type="selection" width="55"> </el-table-column>
+        <el-table-column type="selection" width="40"> </el-table-column>
         <el-table-column type="index" width="50" label="序号"></el-table-column>
 
         <el-table-column
@@ -277,8 +278,13 @@
           >
             下载选中文档
           </el-button>
-          <el-button :disabled="isSelected">重新添加至向量库</el-button>
-          <el-button :disabled="isSelected">从向量库删除</el-button>
+          <!-- <el-button :disabled="isSelected">重新添加至向量库</el-button> -->
+          <el-button @click="handleVS('add')" :disabled="isSelected"
+            >添加至向量库</el-button
+          >
+          <el-button @click="handleVS('delete')" :disabled="isSelected"
+            >从向量库删除</el-button
+          >
           <el-button
             type="primary"
             @click="handleDelete"
@@ -308,7 +314,9 @@
 </template>
 
 <script>
-// import { v4 as uuidv4 } from "uuid";
+import { fetchEventSource } from "@microsoft/fetch-event-source";
+import { getServerConfig } from "@/api/server";
+
 import {
   getKbList, // 获取知识库列表
   createKb, // 创建知识库
@@ -320,11 +328,11 @@ import {
   updateKbFile, // 更新现有文件到数据库
   downloadFile, // 下载对应的知识文件
   searchKb, // 搜索知识库
-  recreateVectorStore,
+  recreateVectorStore, // 根据content中文档重建向量库，流式输出处理进度
 } from "@/api/knowledge";
 
 export default {
-  props: ["customStyle", "handleReceive"],
+  props: ["customStyle"],
   data() {
     return {
       headers: {
@@ -334,22 +342,13 @@ export default {
       nameKB: "",
       nameTable: "",
       formKB: {},
-      createOptions: [
-        // {
-        //   label: "samples",
-        //   value: "samples",
-        // },
-        // {
-        //   label: "新建知识库",
-        //   value: "新建知识库",
-        // },
-      ],
+      createOptions: [],
       isCreate: false, // 默认是非创建页面
       formCreate: {
         knowledge_base_name: "",
         brief: "",
-        vector_store_type: "faiss",
-        embed_model: "ernie-tiny",
+        vector_store_type: "",
+        embed_model: "",
       },
       rulesCreate: {
         knowledge_base_name: [
@@ -387,21 +386,12 @@ export default {
 
       formSelect: {
         textarea: "",
-        maxlength: 250,
-        overlength: 250,
+        maxlength: "",
+        overlength: "",
         checked: false,
       },
 
-      tableData: [
-        // {
-        //   name: "text.txt",
-        //   loader: "UnstructuredFileLoader",
-        //   tokenizer: "ChineseRecursiveTextSpliter",
-        //   num: "42",
-        //   source: "success",
-        //   vector: "success",
-        // },
-      ],
+      tableData: [],
 
       columns: [
         {
@@ -485,38 +475,28 @@ export default {
       selectedArray: "",
     };
   },
-
-  watch: {},
-
   created() {
-    console.log("created------------------");
+    console.log(
+      "知识库表单created-------------------------------------------------------------------------------"
+    );
+
     // 获取知识库列表
     this.getList();
 
-    searchKb({
-      query: "chat",
-      knowledge_base_name: "eat",
-      top_k: 3,
-      score_threshold: 1,
-    });
-
-    recreateVectorStore({
-      knowledge_base_name: "samples",
-      allow_empty_kb: true,
-      vs_type: "faiss",
-      embed_model: "m3e-base",
-      chunk_size: 250,
-      chunk_overlap: 50,
-      zh_title_enhance: false,
-      not_refresh_vs_cache: false,
-    });
+    // 获取服务器原始配置信息
+    getServerConfig()
+      .then((res) => {
+        this.formSelect.maxlength = res["CHUNK_SIZE"];
+        this.formSelect.overlength = res["OVERLAP_SIZE"];
+        this.formSelect.checked = res["ZH_TITLE_ENHANCE"];
+        this.formCreate.vector_store_type = res["DEFAULT_VS_TYPE"];
+        this.formCreate.embed_model = res["EMBEDDING_MODEL"];
+      })
+      .catch(() => {});
   },
 
   methods: {
-    handleSend(options) {
-      this.handleReceive(options);
-    },
-
+    // 获取知识库列表
     getList() {
       getKbList()
         .then((res) => {
@@ -533,7 +513,7 @@ export default {
             this.formSelect.textarea = `关于 ${this.nameKB} 的简介`;
             this.handleFileList(this.createOptions[0].value);
 
-            console.log(this.createOptions);
+            // console.log(this.createOptions);
           } else {
             this.isCreate = true;
           }
@@ -543,22 +523,18 @@ export default {
 
     // 新建知识库
     handleCreate() {
-      // console.log(this.formCreate);
       this.$refs["formCreate"].validate((valid) => {
         if (valid) {
           delete this.formCreate.brief;
-          let res =JSON.stringify(this.formCreate)
-          createKb(res).then((res) => {
+          createKb(this.formCreate).then((res) => {
+            this.$message.success("创建知识库成功");
             this.getList();
             this.isCreate = false;
-            // this.handleSend(knowOptions);
-
-            // 初始化创建表单
             this.formCreate = {
               knowledge_base_name: "",
               brief: "",
               vector_store_type: "faiss",
-              embed_model: "ernie-tiny",
+              embed_model: "m3e-base",
             };
           });
         } else {
@@ -570,18 +546,20 @@ export default {
 
     // 获取知识库文件
     handleFileList(name) {
-      getKbFileList({ knowledge_base_name: name }).then((res) => {
-        this.tableData = res.map((item) => {
-          return { name: item };
-        });
+      getKbFileList({ knowledge_base_name: name })
+        .then((res) => {
+          this.tableData = res.map((item) => {
+            return { name: item };
+          });
 
-        if (this.tableData.length == 0) {
-          this.nameTable = "知识库暂时没有文件";
-        } else {
-          this.nameTable =
-            "知识库中包含源文件和向量库，请从下表中选择文件后操作";
-        }
-      });
+          if (this.tableData.length == 0) {
+            this.nameTable = "知识库暂时没有文件";
+          } else {
+            this.nameTable =
+              "知识库中包含源文件和向量库，请从下表中选择文件后操作";
+          }
+        })
+        .catch(() => {});
     },
 
     // 更新知识库介绍
@@ -589,16 +567,18 @@ export default {
       updateKbInfo({
         knowledge_base_name: this.formKB.knowledge,
         kb_info: evt.target.value,
-      }).then((res) => {});
+      })
+        .then((res) => {
+          this.$message.success("更新知识库介绍");
+        })
+        .catch(() => {});
     },
 
     // 选择或新建知识库
     handleSelectOrCreate(val) {
-      console.log(val);
       if (val == "新建知识库") {
         this.isCreate = true;
       } else {
-        // this.getList();
         this.handleFileList(val);
         this.formKB.knowledge = val;
         this.nameKB = val;
@@ -627,22 +607,21 @@ export default {
         file_names: files,
         delete_content: false, // 是否从知识库删除
         not_refresh_vs_cache: false, // 是否从向量库删除
-      }).then((res) => {
-        this.handleFileList(this.formKB.knowledge);
-      });
-
-      if (this.tableData.length == 0) {
-        this.nameTable = "知识库暂时没有文件";
-      } else {
-        this.nameTable = "知识库中包含源文件和向量库，请从下表中选择文件后操作";
-      }
+      })
+        .then((res) => {
+          this.handleFileList(this.formKB.knowledge);
+          this.$message.success("删除知识库文件成功");
+        })
+        .catch(() => {});
     },
 
     handleDeleteKB() {
-      deleteKb({ knowledge_base_name: this.formKB.knowledge }).then((res) => {
-        this.getList();
-        this.isCreate = true;
-      });
+      deleteKb(JSON.stringify(this.formKB.knowledge))
+        .then((res) => {
+          this.getList();
+          this.$message.success("删除知识库成功");
+        })
+        .catch(() => {});
     },
 
     // 下载选中文档
@@ -650,47 +629,23 @@ export default {
       if (this.selectedArray.length > 1) {
         this.$message.warning("请选择一个下载文档");
       } else {
-        let url = `http://192.168.11.108:7861/knowledge_base/download_doc?knowledge_base_name=${
+        let url = `http://192.168.61.108:7861/knowledge_base/download_doc?knowledge_base_name=${
           this.formKB.knowledge
         }&file_name=${this.selectedArray[0].name}&preview=${false}`;
 
         window.open(url);
       }
-
-      // downloadFile({
-      //   knowledge_base_name: this.formKB.knowledge,
-      //   file_name: "test.txt",
-      //   preview: false,
-      // })
-      //   .then((res) => {
-      //     console.log(res)
-      //   })
-      //   .catch((err) => {});
-
-      // const element = document.createElement("a");
-      // const file = new Blob([this.fileContent], {
-      //   type: "text/plain;charset=utf-8",
-      // });
-      // element.href = URL.createObjectURL(file);
-      // element.download = fileName;
-      // element.style.display = "none";
-      // document.body.appendChild(element);
-      // element.click();
-      // document.body.removeChild(element);
     },
 
     // 自定义上传方法
     httpRequest(obj) {
-      // console.log("@");
+      let name = this.fileList[0].name;
       this.fileList = [];
-      this.fileList.push(obj);
+      this.fileList.push({ ...obj, name });
     },
 
-    // 上传文件之前的钩子，参数为上传的文件
     handleBeforeUpload(file) {
-      console.log("上传的文件", file);
       this.fileList.push(file);
-
       this.isUpload = false;
       const isLt200M = file.size / 1024 / 1024 < 200;
       if (!isLt200M) {
@@ -699,6 +654,7 @@ export default {
       }
     },
 
+    // 添加文件到知识库
     confirmUpload() {
       var doc = JSON.stringify({
         "test.txt": [
@@ -715,6 +671,7 @@ export default {
       this.fileList.forEach((item) => {
         params.append("files", item.file);
       });
+      console.log(this.fileList);
 
       params.append("knowledge_base_name", this.formKB.knowledge);
       params.append("override", false);
@@ -727,12 +684,13 @@ export default {
 
       uploadKbFile(params)
         .then((res) => {
-          this.$message.success("上传成功！");
+          this.$message.success("上传成功");
           this.isUpload = true;
           this.fileList = [];
         })
         .catch(() => {
-          this.$message.error("上传失败！");
+          this.$message.error("上传失败");
+          this.isUpload = true;
         });
     },
 
@@ -740,23 +698,85 @@ export default {
       this.$message({ type: "error", message: "最多支持1个附件上传" });
     },
 
-    //	文件列表移除文件时的钩子
     handleRemove(file, fileList) {
+      this.fileList = [];
       this.isUpload = true;
     },
 
-    handleTableClick(column) {
-      console.log(column);
-    },
-
-    handleSortChange(column) {
-      this.$forceUpdate();
-      // console.log(column);
-    },
-
     handleRestart() {
-      this.isLoading = true; // 点击按钮后显示提示信息
+      this.getProgress();
+    },
 
+    async getProgress() {
+      this.isLoading = true;
+      const controller = new AbortController();
+      const signal = controller.signal;
+
+      let response = await fetchEventSource(
+        "http://192.168.61.108:7861/knowledge_base/recreate_vector_store",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          openWhenHidden: true,
+          signal: signal,
+          body: JSON.stringify({
+            knowledge_base_name: this.formKB.knowledge,
+            allow_empty_kb: true,
+            vs_type: "faiss",
+            embed_model: "m3e-base",
+            chunk_size: this.formSelect.maxlength,
+            chunk_overlap: this.formSelect.overlength,
+            zh_title_enhance: this.formSelect.checked,
+            not_refresh_vs_cache: false,
+          }),
+
+          onopen: async (response) => {
+            const encode = new TextDecoder("utf-8");
+
+            const reader = response.body.getReader();
+
+            while (true) {
+              console.log(this);
+              const { done, value } = await reader.read();
+              console.log("是否已经读完所有内容：", done);
+              if (done) {
+                this.isLoading = false;
+                controller.abort(); 
+                break;
+              }
+              const text = encode.decode(value);
+              console.log("内容：", text);
+            }
+            this.isLoading = false;
+          },
+
+          onmessage(event) {
+            console.log(event);
+          },
+
+          onerror(event) {
+            console.log("服务异常", event);
+          },
+
+          onclose() {
+            console.log("服务关闭");
+          },
+        }
+      );
+    },
+
+    // 向量库删除和添加
+    handleVS(type) {
+      var flag;
+      if (type == "add") {
+        flag = false;
+      } else {
+        flag = true;
+      }
       var doc = JSON.stringify({
         "test.txt": [
           {
@@ -766,11 +786,9 @@ export default {
           },
         ],
       });
-
       let files = this.selectedArray.map((item) => {
         return item.name;
       });
-
       updateKbFile({
         file_names: files,
         knowledge_base_name: this.formKB.knowledge,
@@ -779,18 +797,25 @@ export default {
         zh_title_enhance: this.formSelect.checked,
         override_custom_docs: false,
         docs: doc,
-        not_refresh_vs_cache: false,
+        not_refresh_vs_cache: flag,
       })
-        .then(() => {
-          this.isLoading = false;
+        .then((res) => {
+          this.$message.success("操作成功");
         })
-        .catch(() => {
-          this.isLoading = false;
-        });
+        .catch(() => {});
+    },
+
+    handleTableClick(column) {
+      console.log(column);
+    },
+
+    handleSortChange(column) {
+      this.$forceUpdate();
     },
   },
 };
 </script>
+
 <style lang="scss" scoped>
 .knowledge-base {
   width: 100%;
