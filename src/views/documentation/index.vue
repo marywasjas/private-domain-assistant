@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="content">
+    <div class="container">
       <!-- left -->
       <div
         class="sidebar-box"
@@ -82,7 +82,7 @@
             <div class="mode">Temperature：</div>
             <el-slider
               style="margin: 0 10px"
-              v-model="sliderValue"
+              v-model="temperature"
               :format-tooltip="formatTooltip"
               :marks="marks"
               :show-tooltip="true"
@@ -92,7 +92,7 @@
           <div v-show="isDialog">
             <div class="mode">历史对话轮数：</div>
             <el-input-number
-              v-model="roundsValue"
+              v-model="historyLength"
               :min="0"
               :max="1000"
               label="描述文字"
@@ -194,17 +194,64 @@
 
       <!-- right -->
       <div class="right">
-        <Dialog
-          v-if="isDialog"
-          :messages="messages"
-          :customStyle="customStyle"
-          @get-msg="getMsg"
-        />
-        <Form
-          v-else
-          :customStyle="customStyle"
-          :handleReceive="handleReceive"
-        />
+        <Form :customStyle="customStyle" v-if="!isDialog" />
+
+        <div v-show="isDialog" class="dialog" :style="customStyle">
+          <!-- 对话区 -->
+          <div class="main">
+            <div v-for="item in messages" :key="item.id" class="message">
+              <img v-if="!item.isFromUser" src="../../../public/chat.png" />
+              <img v-else src="../../../public/personal.png" />
+
+              <span v-if="item.isFromUser" class="user-message content">
+                <div style="color: grey">{{ item.currentTime }}</div>
+                <br />
+                {{ item.text }}
+              </span>
+
+              <div v-else class="bot-message content">
+                <div
+                  style="
+                    font-size: 14px;
+                    margin-bottom: 5px;
+                    display: flex;
+                    align-items: center;
+                  "
+                >
+                  <span style="margin-right: 5px">知识库</span>
+                  <el-tag type="success" size="small">
+                    {{ item.knowValue }}
+                  </el-tag>
+                </div>
+
+                <el-collapse class="dialog-collapse">
+                  <el-collapse-item>
+                    <template slot="title">
+                      <div>
+                        <strong class="el-icon-check"></strong>
+                        知识库匹配结果
+                      </div>
+                    </template>
+                    <div class="response"></div>
+                  </el-collapse-item>
+                </el-collapse>
+              </div>
+            </div>
+          </div>
+          <!-- 输入区 -->
+          <div class="input-container">
+            <el-input
+              v-model="userInput"
+              :disabled="isInput"
+              @keyup.enter.native="sendMessage"
+              size="medium"
+              type="text"
+              placeholder="请输入对话内容，换行请使用Shift+Enter"
+            >
+              <i slot="suffix" class="el-icon-s-promotion el-input__icon" />
+            </el-input>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -253,7 +300,7 @@
       <strong>Mode</strong>
       <br /><br />
 
-      <el-checkbox v-model="checked" @change="handleWide">
+      <el-checkbox v-model="checkedwide" @change="handleWide">
         Widescreen
       </el-checkbox>
       <br /><br />
@@ -274,19 +321,27 @@
 
 <script>
 import { v4 as uuidv4 } from "uuid";
-import Dialog from "./components/Dialog.vue";
 import Form from "./components/Form.vue";
 import ThemePicker from "@/components/ThemePicker";
+import { fetchEventSource } from "@microsoft/fetch-event-source";
+
+import { getServerConfig, getServerSeo } from "@/api/server";
+import { getKbList } from "@/api/knowledge";
+import {
+  listRunningModels, // 列出当前已加载模型
+  listConfigModels, // 列出configs已配置的模型
+  changeMode, // 切换指定的LLM模型
+} from "@/api/llm-mode";
 
 export default {
   components: {
-    Dialog,
     Form,
     ThemePicker,
   },
 
   mounted() {
     this.handleDrag(20);
+    this.getConfig();
   },
 
   data() {
@@ -295,12 +350,24 @@ export default {
         paddingLeft: 70 + "px",
         paddingRight: 70 + "px",
       },
+      delay: 20,
+      sidebarWidth: 500,
+      collapsed: false,
+      visibility: "visible",
       dialogVisible: false,
-      checked: false,
-
+      checkedwide: false,
       article: "", // print打印内容
       fullscreenLoading: true, // print打印内容
+
+      isDialog: true, // 右侧内容默认是对话
+
+      isReqLoading: false,
+
+      old_model_name: "",
+      controller_address: "",
+
       activeNames: "1",
+
       dialogMode: "LLM 对话", // 对话模式
       dialogModeOption: [
         { label: "LLM 对话", value: "LLM 对话" },
@@ -308,126 +375,133 @@ export default {
         { label: "搜索引擎问答", value: "搜索引擎问答" },
         { label: "自定义Agent问答", value: "自定义Agent问答" },
       ],
-      LLMMode: "Qwen-14B-Chat-Int4 (Running)",
-      LLMModeOption: [
-        { label: "zhipu-api (Running)", value: "zhipu-api (Running)" },
-        {
-          label: "Qwen-14B-Chat-Int4 (Running)",
-          value: "Qwen-14B-Chat-Int4 (Running)",
-        },
-        { label: "Azure-OpenAI (Running)", value: "Azure-OpenAI (Running)" },
-        { label: "OpenAI (Running)", value: "OpenAI (Running)" },
-        { label: "Anthropic (Running)", value: "Anthropic (Running)" },
-      ],
-      promptTemp: "default",
-      promptTempOption: [
-        { label: "default", value: "default" },
-        { label: "py", value: "py" },
-      ],
 
-      isReqLoading: false,
+      LLMMode: "",
+      LLMModeOption: [],
 
-      isDialog: true, // 右侧内容默认是对话
-      // isDialog: false,  // 右侧内容默认是表单
+      promptTemp: "",
+      promptTempOption: [],
 
-      sidebarWidth: 500,
-      collapsed: false,
-      visibility: "visible",
+      llm_chat: "",
+      knowledge_base_chat: "",
+      search_engine_chat: "",
+      agent_chat: "",
 
       // 滑块组件
-      sliderValue: 45,
+      temperature: "",
       marks: { 0: "0.00", 100: "1.00" },
+
       // 历史对话轮数
-      roundsValue: 3,
+      historyLength: "",
 
       // 知识库配置
-      knowOptions: [
-        {
-          value: "samples",
-          label: "samples",
-        },
-      ],
-      knowValue: "samples",
-      roundsKnow: 3,
-      sliderKnow: 45,
-      // 搜索引擎匹配
-      searchOptions: [
-        {
-          value: "bing",
-          label: "bing",
-        },
-        {
-          value: "duckduckgo",
-          label: "duckduckgo",
-        },
-        {
-          value: "metaphor",
-          label: "metaphor",
-        },
-      ],
-      searchValue: "duckduckgo",
-      roundsSearch: 3,
+      knowOptions: [],
+      knowValue: "",
+      roundsKnow: "",
+      sliderKnow: "",
 
-      delay: 20,
+      // 搜索引擎匹配
+      searchOptions: [],
+      searchValue: "",
+      roundsSearch: "",
 
       // 对话
+      userInput: "",
       currentTime: "",
       messages: [
-        {
-          text: "今天星期几",
-          index: "001",
-          isFromUser: true,
-          currentTime: this.formatDateTime(new Date()),
-          isError: false,
-        },
-        {
-          text: "明天会下雨吗",
-          index: "002",
-          isFromUser: true,
-          currentTime: this.formatDateTime(new Date()),
-          isError: false,
-        },
-        {
-          text: "第一个登上月球的人叫什么",
-          index: "003",
-          isFromUser: true,
-          currentTime: this.formatDateTime(new Date()),
-          isError: false,
-        },
-        {
-          text: "^_^ @_@",
-          index: "004",
-          isFromUser: false,
-          currentTime: this.formatDateTime(new Date()),
-          isError: false,
-        },
+        // {
+        //   text: "今天星期几",
+        //   index: "001",
+        //   isFromUser: true,
+        //   currentTime: this.formatDateTime(new Date()),
+        //   isError: false,
+        // },
+        // {
+        //   text: "^_^ @_@",
+        //   index: "004",
+        //   isFromUser: false,
+        //   currentTime: this.formatDateTime(new Date()),
+        //   isError: false,
+        // },
       ],
+      isInput: false,
+      isThinking: false,
+      text: "",
     };
   },
 
   methods: {
-    getMsg(msg) {
-      this.messages.push(msg);
+    getConfig() {
+      // 获取服务器原始配置信息
+      getServerConfig()
+        .then((res) => {
+          console.log("配置信息", res);
+          this.old_model_name = res["LLM_MODEL"];
+          this.LLMMode = res["LLM_MODEL"];
+
+          this.knowValue = res["DEFAULT_KNOWLEDGE_BASE"];
+          this.roundsKnow = res["VECTOR_SEARCH_TOP_K"];
+          this.sliderKnow = res["SCORE_THRESHOLD"] * 100;
+
+          this.searchValue = res["DEFAULT_SEARCH_ENGINE"];
+          this.roundsSearch = res["SEARCH_ENGINE_TOP_K"];
+
+          this.controller_address = res["controller_address"];
+          this.historyLength = res["HISTORY_LEN"];
+          this.temperature = res["TEMPERATURE"] * 100;
+
+          this.llm_chat = Object.keys(res["PROMPT_TEMPLATES"].llm_chat);
+
+          this.knowledge_base_chat = Object.keys(
+            res["PROMPT_TEMPLATES"].knowledge_base_chat
+          );
+
+          this.search_engine_chat = Object.keys(
+            res["PROMPT_TEMPLATES"].search_engine_chat
+          );
+
+          this.agent_chat = Object.keys(res["PROMPT_TEMPLATES"].agent_chat);
+
+          this.promptTempOption = this.llm_chat.map((item) => {
+            return { value: item, label: item };
+          });
+          this.promptTemp = this.promptTempOption[0].value;
+
+          //! 列出当前已加载模型
+          listRunningModels({
+            controller_address: this.controller_address,
+            placeholder: "string",
+          })
+            .then((res) => {
+              var model_running = Object.keys(res).map((item) => {
+                return {
+                  value: item + " (Running)",
+                  label: item + " (Running)",
+                };
+              });
+
+              //! 列出configs已配置的模型
+              listConfigModels()
+                .then((res) => {
+                  let langchain = Object.keys(res.langchain);
+                  let online = Object.keys(res.online);
+                  let model = langchain.concat(online).map((item) => {
+                    return { value: item, label: item };
+                  });
+
+                  this.LLMModeOption = model_running.concat(model);
+                })
+                .catch(() => {});
+            })
+            .catch(() => {});
+        })
+        .catch(() => {});
     },
 
-    handleReceive(options) {
-      this.knowOptions = options;
-    },
-    handleTheme(val) {
-      this.$store.dispatch("settings/changeSetting", {
-        key: "theme",
-        value: val,
-      });
-    },
     handleDrag(delay) {
-      console.log(this.sidebarWidth);
-
+      // console.log(this.sidebarWidth);
       const dragBtn = document.querySelector(".btn-drag");
-
       const slideBarBox = document.querySelector(".sidebar-box");
-
-      // console.log(dragBtn,slideBarBox)
-
       //鼠标按下
       dragBtn.onmousedown = (e) => {
         //记录鼠标开始位置
@@ -477,195 +551,6 @@ export default {
         return false; //阻止默认事件
       };
     },
-
-    handleWide(val) {
-      console.log(val);
-      if (val == true) {
-        this.customStyle = {
-          padding: 0,
-        };
-      } else {
-        this.customStyle = {
-          paddingLeft: 100 + "px",
-          paddingRight: 100 + "px",
-        };
-      }
-    },
-    handleClose(done) {
-      this.$confirm("确认关闭？")
-        .then((_) => {
-          done();
-        })
-        .catch((_) => {});
-    },
-
-    // 切换知识库管理
-    handleKnowledge() {
-      // loading 效果
-      this.isReqLoading = true;
-      setTimeout(() => {
-        this.isReqLoading = false;
-      }, 5000);
-
-      this.isDialog = false;
-    },
-    // 切换对话
-    handleChat() {
-      // loading 效果
-      this.isReqLoading = true;
-      setTimeout(() => {
-        this.isReqLoading = false;
-      }, 5000);
-
-      this.isDialog = true;
-    },
-    // 选择对话模式
-    handleDialogMode(val) {
-      // loading 效果
-      this.isReqLoading = true;
-      setTimeout(() => {
-        this.isReqLoading = false;
-      }, 5000);
-
-      if (val == "LLM 对话") {
-        this.promptTempOption = [
-          { label: "default", value: "default" },
-          { label: "py", value: "py" },
-        ];
-      } else if (val == "知识库问答") {
-        this.promptTempOption = [
-          { label: "default", value: "default" },
-          { label: "text", value: "text" },
-        ];
-      } else if (val == "搜索引擎问答") {
-        this.promptTempOption = [
-          { label: "default", value: "default" },
-          { label: "search", value: "search" },
-        ];
-      } else if (val == "自定义Agent问答") {
-        this.promptTempOption = [
-          { label: "chatGLM", value: "chatGLM" },
-          { label: "Qwen", value: "Qwen" },
-        ];
-      }
-
-      const h = this.$createElement;
-
-      this.$notify({
-        message: h(
-          "span",
-          { style: "color: black" },
-          "已切换成" + val + "模式"
-        ),
-        position: "bottom-right",
-        duration: 1500,
-      });
-    },
-    // 选择LLM模式
-    handleLLMMode(val) {
-      // loading 效果
-      this.isReqLoading = true;
-      setTimeout(() => {
-        this.isReqLoading = false;
-      }, 5000);
-
-      const h = this.$createElement;
-
-      this.$notify({
-        message: h(
-          "span",
-          { style: "color: black" },
-          "已切换成" + val + "模式"
-        ),
-        position: "bottom-right",
-        duration: 1500,
-      });
-    },
-    // 选择prompt模版
-    handlePromptMode(val) {
-      // loading 效果
-      this.isReqLoading = true;
-      setTimeout(() => {
-        this.isReqLoading = false;
-      }, 5000);
-
-      const h = this.$createElement;
-
-      this.$notify({
-        message: h(
-          "span",
-          { style: "color: black" },
-          "已切换成" + val + "模式"
-        ),
-        position: "bottom-right",
-        duration: 1500,
-      });
-    },
-    // Record a screencast
-    handleRecord() {
-      this.$confirm(
-        "Due to liminations with some browsers, this feature is only supported on recent desktop versions of Chrome, Firefox, and Edge.",
-        "Record a screencast",
-        { type: "warning" }
-      )
-        .then(() => {
-          // this.$message({
-          //   type: "success",
-          //   message: "删除成功!",
-          // });
-        })
-        .catch(() => {
-          // this.$message({
-          //   type: "info",
-          //   message: "已取消删除",
-          // });
-        });
-    },
-    // Report a bug
-    handleReport() {},
-    // 帮助
-    handleHelp() {},
-    // Return
-    handleReturn() {},
-    // About
-    handleAbout() {
-      this.$confirm(
-        "Due to liminations with some browsers, this feature is only supported on recent desktop versions of Chrome, Firefox, and Edge.",
-        "About"
-        // { type: "warning" }
-      )
-        .then(() => {
-          // this.$message({
-          //   type: "success",
-          //   message: "删除成功!",
-          // });
-        })
-        .catch(() => {
-          // this.$message({
-          //   type: "info",
-          //   message: "已取消删除",
-          // });
-        });
-    },
-    // Print
-    handlePrint() {
-      import("./content.js").then((data) => {
-        const { title } = data.default;
-        document.title = title;
-        this.article = data.default;
-        setTimeout(() => {
-          this.fullscreenLoading = false;
-          this.$nextTick(() => {
-            window.print();
-          });
-        }, 1000);
-      });
-    },
-
-    handleSetting() {
-      this.dialogVisible = true;
-    },
-
     // 左侧面板切换
     handleToggle() {
       this.collapsed = !this.collapsed;
@@ -677,6 +562,241 @@ export default {
         this.visibility = "visible";
       }
     },
+    // 切换到知识库管理
+    handleKnowledge() {
+      this.isDialog = false;
+      this.getConfig();
+    },
+    // 切换到对话
+    handleChat() {
+      this.isDialog = true;
+      this.getConfig();
+    },
+    // 选择对话模式
+    handleDialogMode(val) {
+      if (val == "LLM 对话") {
+        this.promptTempOption = this.llm_chat.map((item) => {
+          return { value: item, label: item };
+        });
+      } else if (val == "知识库问答") {
+        this.promptTempOption = this.knowledge_base_chat.map((item) => {
+          return { value: item, label: item };
+        });
+        // 获取知识库列表
+        getKbList()
+          .then((res) => {
+            this.knowOptions = res.map((item) => {
+              return { label: item, value: item };
+            });
+          })
+          .catch(() => {});
+      } else if (val == "搜索引擎问答") {
+        this.promptTempOption = this.search_engine_chat.map((item) => {
+          return { value: item, label: item };
+        });
+        // 获取服务器支持的搜索引擎
+        getServerSeo()
+          .then((res) => {
+            this.searchOptions = res.map((item) => {
+              return { value: item, label: item };
+            });
+          })
+          .catch(() => {});
+      } else if (val == "自定义Agent问答") {
+        this.promptTempOption = this.agent_chat.map((item) => {
+          return { value: item, label: item };
+        });
+      }
+
+      const h = this.$createElement;
+
+      this.$notify({
+        message: h(
+          "span",
+          { style: "color: black" },
+          "已切换成" + val + "模式"
+        ),
+        position: "bottom-right",
+        duration: 1500,
+      });
+    },
+
+    // 选择LLM模式 / 切换指定的LLM模型
+    handleLLMMode(val) {
+      this.isReqLoading = true;
+      if (!val.includes("R") && !this.old_model_name.includes("R")) {
+        changeMode({
+          model_name: this.old_model_name,
+          new_model_name: val,
+          controller_address: this.controller_address,
+        })
+          .then((res) => {
+            this.isReqLoading = false;
+            this.old_model_name = val;
+            const h = this.$createElement;
+            this.$notify({
+              message: h(
+                "span",
+                { style: "color: black" },
+                "已切换成" + val + "模式"
+              ),
+              position: "bottom-right",
+              duration: 1500,
+            });
+          })
+          .catch((err) => {
+            console.log(err);
+            this.isReqLoading = false;
+          });
+      } else {
+        this.isReqLoading = false;
+        this.old_model_name = val;
+      }
+    },
+
+    // 选择prompt模版
+    handlePromptMode(val) {
+      const h = this.$createElement;
+
+      this.$notify({
+        message: h(
+          "span",
+          { style: "color: black" },
+          "已切换成" + val + "模式"
+        ),
+        position: "bottom-right",
+        duration: 1500,
+      });
+    },
+
+    // 发送信息
+    sendMessage() {
+      if (this.userInput.trim()) {
+        this.isInput = true;
+
+        let newMessage = {
+          text: this.userInput,
+          isFromUser: true,
+          currentTime: this.formatDateTime(new Date()),
+          id: uuidv4(),
+        };
+        this.messages.push(newMessage);
+
+        let newMessage2 = {
+          text: "",
+          isFromUser: false,
+          knowValue: this.knowValue,
+          id: uuidv4(),
+        };
+        this.messages.push(newMessage2);
+
+        // 请求
+        this.send(this.userInput);
+        // 清空
+        this.userInput = "";
+        // 让滚动条在底部
+        setTimeout(function () {
+          var showContent = document.querySelector(".main");
+          showContent.scrollTop = showContent.scrollHeight + 5000;
+        }, 100);
+      } else {
+        this.$message({
+          dangerouslyUseHTMLString: true,
+          message: "请输入查询内容",
+          showClose: true,
+        });
+      }
+    },
+
+    async send(query) {
+      const controller = new AbortController();
+
+      const signal = controller.signal;
+
+      await fetchEventSource(
+        "http://192.168.61.108:7861/chat/knowledge_base_chat",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          openWhenHidden: true,
+
+          signal: signal,
+
+          body: JSON.stringify({
+            query: query,
+            knowledge_base_name: this.knowValue,
+            top_k: this.roundsKnow,
+            score_threshold: this.sliderKnow / 100,
+            history: [
+              {
+                role: "user",
+                content: "我们来玩成语接龙，我先来，生龙活虎",
+              },
+              {
+                role: "assistant",
+                content: "虎头虎脑",
+              },
+            ],
+            stream: false,
+            model_name: this.LLMMode,
+            temperature: this.temperature / 100,
+            prompt_name: this.promptTemp,
+            // max_tokens: "none",
+          }),
+
+          onopen: async (response) => {
+            var divs = document.getElementsByClassName("response");
+            var output = divs[divs.length - 1];
+            output.innerText = "。。。。。。";
+            //获取UTF8的解码
+            const encode = new TextDecoder("utf-8");
+
+            const reader = response.body.getReader();
+
+            var res = "";
+
+            while (true) {
+              const { done, value } = await reader.read();
+              console.log("是否已经读完所有内容", done);
+              if (done) {
+                controller.abort();
+                this.isInput = false;
+                break;
+              }
+
+              const text = encode.decode(value);
+              console.log("*****", text);
+              res += text;
+            }
+            let obj = JSON.parse(JSON.stringify(res));
+            let docs = JSON.parse(obj).docs;
+            console.log(JSON.parse(obj));
+            output.innerText = JOSN.stringify(docs);
+            setTimeout(function () {
+              var showContent = document.querySelector(".main");
+              showContent.scrollTop = showContent.scrollHeight + 5000;
+            }, 100);
+          },
+          onmessage: (event) => {
+            console.log(event);
+            controller.abort();
+          },
+          onerror: (event) => {
+            console.log("服务异常", event);
+            controller.abort();
+          },
+          onclose: () => {
+            console.log("服务关闭");
+            controller.abort();
+          },
+        }
+      );
+    },
+
     // 清空对话
     handleClear() {
       this.messages = [];
@@ -730,15 +850,269 @@ export default {
     formatTooltip(val) {
       return val / 100;
     },
+
+    // Record a screencast
+    handleRecord() {
+      this.$confirm(
+        "Due to liminations with some browsers, this feature is only supported on recent desktop versions of Chrome, Firefox, and Edge.",
+        "Record a screencast",
+        { type: "warning" }
+      )
+        .then(() => {
+          // this.$message({
+          //   type: "success",
+          //   message: "删除成功!",
+          // });
+        })
+        .catch(() => {
+          // this.$message({
+          //   type: "info",
+          //   message: "已取消删除",
+          // });
+        });
+    },
+    // Report a bug
+    handleReport() {},
+    // Get help
+    handleHelp() {},
+    // Return
+    handleReturn() {},
+    // About
+    handleAbout() {
+      this.$confirm(
+        "Due to liminations with some browsers, this feature is only supported on recent desktop versions of Chrome, Firefox, and Edge.",
+        "About"
+        // { type: "warning" }
+      )
+        .then(() => {
+          // this.$message({
+          //   type: "success",
+          //   message: "删除成功!",
+          // });
+        })
+        .catch(() => {
+          // this.$message({
+          //   type: "info",
+          //   message: "已取消删除",
+          // });
+        });
+    },
+    // Print
+    handlePrint() {
+      import("./content.js").then((data) => {
+        const { title } = data.default;
+        document.title = title;
+        this.article = data.default;
+        setTimeout(() => {
+          this.fullscreenLoading = false;
+          this.$nextTick(() => {
+            window.print();
+          });
+        }, 1000);
+      });
+    },
+    // Setting
+    handleSetting() {
+      this.dialogVisible = true;
+    },
+    handleTheme(val) {
+      this.$store.dispatch("settings/changeSetting", {
+        key: "theme",
+        value: val,
+      });
+    },
+    handleWide(val) {
+      console.log(val);
+      if (val == true) {
+        this.customStyle = {
+          padding: 0,
+        };
+      } else {
+        this.customStyle = {
+          paddingLeft: 100 + "px",
+          paddingRight: 100 + "px",
+        };
+      }
+    },
+    handleClose(done) {
+      this.$confirm("确认关闭？")
+        .then((_) => {
+          done();
+        })
+        .catch((_) => {});
+    },
+
+    async getProgress() {
+      this.isLoading = true;
+      // 创建 AbortController 对象和 AbortSignal 信号量
+      const controller = new AbortController();
+      const signal = controller.signal;
+
+      let response = await fetchEventSource(
+        "http://192.168.61.108:7861/chat/agent_chat",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          openWhenHidden: true,
+          signal: signal, // 将 signal 作为选项参数传递
+          body: JSON.stringify({
+            query: "恼羞成怒",
+            history: [
+              {
+                role: "user",
+                content: "请使用知识库工具查询今天北京天气",
+              },
+              {
+                role: "assistant",
+                content:
+                  "使用天气查询工具查询到今天北京多云，10-14摄氏度，东北风2级，易感冒",
+              },
+            ],
+            stream: false,
+            model_name: "Qwen-14B-Chat-Int4",
+            temperature: 0.7,
+            // max_tokens: 0,
+            prompt_name: "default",
+          }),
+
+          onopen: async (response) => {
+            console.log(response);
+            //获取UTF8的解码
+            const encode = new TextDecoder("utf-8");
+            //获取body的reader
+            const reader = response.body.getReader();
+            // 循环读取reponse中的内容
+            while (true) {
+              const { done, value } = await reader.read();
+              console.log("是否已经读完所有内容", done);
+              if (done) {
+                controller.abort(); //读完内容，关闭请求
+                break;
+              }
+              // 解码内容
+              const text = encode.decode(value);
+              console.log("@@", text);
+              // 对解码后的信息进行判断
+              if (text === "<ERR>") {
+                // 当获取错误token时，输出错误信息
+                lastDiv.innerText = "Error";
+                break;
+              } else {
+                // this.hideThinkingMessage();
+                // 获取正常信息时，逐字追加输出
+                lastDiv.innerText += text;
+                console.log("**", lastDiv.innerText);
+              }
+            }
+          },
+          //服务返回的数据
+          onmessage: (event) => {
+            console.log(event);
+          },
+          // 服务异常
+          onerror: (event) => {
+            console.log("服务异常", event);
+          },
+          // 服务关闭
+          onclose: () => {
+            console.log("服务关闭");
+          },
+        }
+      );
+    },
   },
 };
 </script>
 
 <style lang="scss" scoped>
-.content {
+.container {
   display: flex;
   height: calc(100vh - 50px);
   width: 100%;
+}
+.content {
+  display: flex;
+  flex: 1;
+}
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: -webkit-fill-available;
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    margin-left: 10px;
+    margin-top: 50px;
+    height: 100%;
+    overflow-y: auto;
+    .message {
+      display: flex;
+      // align-items: center;
+      margin-bottom: 15px;
+      max-width: 100%;
+      img {
+        width: 2.5rem;
+        height: 2.5rem;
+        margin-right: 0.5rem;
+        margin-top: 0.6rem;
+      }
+      .user-message {
+        background-color: #f2f2f2;
+        border-radius: 10px;
+        padding: 15px;
+        display: block;
+        text-align: left;
+        margin-right: 30px;
+        max-width: 100%;
+        margin-left: auto;
+      }
+      .bot-message {
+        // background-color: #f2f2f2;
+        border-radius: 10px;
+        padding: 15px;
+        display: block;
+        text-align: left;
+        margin-right: 30px;
+        max-width: 100%;
+      }
+      // .bot-message::after {
+      //   content: "  ▎";
+      //   animation: blink 1s step-start infinite;
+      // }
+      @keyframes blink {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+      .error-message {
+        background-color: #fdb7b7 !important;
+        border-radius: 10px;
+        padding: 15px;
+        display: block;
+        text-align: left;
+        margin-right: 30px;
+        max-width: 100%;
+      }
+    }
+  }
+  .input-container {
+    margin-left: 30px;
+    margin-right: 30px;
+    margin-bottom: 40px;
+  }
 }
 
 .sidebar-box {
@@ -762,6 +1136,7 @@ export default {
       font-size: 25px;
       justify-content: flex-end;
       margin-top: -40px;
+      margin-right: -10px;
       cursor: pointer;
     }
     .title {
@@ -876,6 +1251,12 @@ export default {
     margin-left: 10px;
     font-size: 25px;
     cursor: pointer;
+  }
+}
+.dialog-collapse {
+  [data-v-6e47ac07] .el-collapse-item__header {
+    font-size: 16px;
+    border-bottom: 1 solid #f2f2f2;
   }
 }
 </style>

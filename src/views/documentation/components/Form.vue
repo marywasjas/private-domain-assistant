@@ -27,9 +27,12 @@
       :rules="rulesCreate"
       class="form-create"
     >
-      <el-form-item prop="name">
+      <el-form-item prop="knowledge_base_name">
         <div>新建知识库名称</div>
-        <el-input v-model="formCreate.name" placeholder="新知识库名称" />
+        <el-input
+          v-model="formCreate['knowledge_base_name']"
+          placeholder="新知识库名称"
+        />
       </el-form-item>
 
       <el-form-item prop="brief">
@@ -44,7 +47,10 @@
         <el-col :span="12">
           <el-form-item>
             <div>向量库类型</div>
-            <el-select v-model="formCreate.vector" style="width: 100%">
+            <el-select
+              v-model="formCreate['vector_store_type']"
+              style="width: 100%"
+            >
               <el-option
                 v-for="item in vectorOption"
                 :key="item.value"
@@ -57,7 +63,7 @@
         <el-col :span="12">
           <el-form-item>
             <div>Embedding 模型</div>
-            <el-select v-model="formCreate.embed" style="width: 100%">
+            <el-select v-model="formCreate['embed_model']" style="width: 100%">
               <el-option
                 v-for="item in embedOption"
                 :key="item.value"
@@ -77,45 +83,55 @@
     </el-form>
 
     <!-- 选择 -->
+    <!-- v-if="!isCreate && createOptions.length > 1" -->
     <el-form
       :key="2"
-      v-if="!isCreate && createOptions.length > 1"
       ref="formSelect"
       :model="formSelect"
       style="width: 70%"
+      v-if="!isCreate && createOptions.length > 1"
     >
       <el-form-item>
         <div style="font-size: 18px">上传知识文件：</div>
         <el-upload
-          class="upload-demo"
+          ref="upload"
           drag
-          multiple
-          show-file-list
-          action="https://jsonplaceholder.typicode.com/posts/"
+          :show-file-list="true"
+          :auto-upload="true"
+          :limit="1"
           :file-list="fileList"
-          :before-upload="handleUpload"
+          :headers="headers"
+          action="#"
+          :before-upload="handleBeforeUpload"
+          :http-request="httpRequest"
           :on-remove="handleRemove"
-          :on-success="handleSuccess"
-          :on-error="handleError"
+          :on-exceed="handleExceed"
         >
           <i class="el-icon-upload" style="margin: 0 20px"></i>
           <div style="text-align: left; width: auto">
             <strong>Drag and drop files here</strong><br />
             <div style="font-size: 16px">
-              Limit 200MB per file ·
+              Limit 200MB per file·
               HTML,MD,JSON,CSV,PDF,PNG,JPG,JPEG,BMP,EML,MSG,RST,RTF,
               TXT,XML,DOCX,EPUB,ODT,PPT,PPTX,TSV,HTM
             </div>
           </div>
-          <div style="">
-            <el-button style="margin: 0 20px">Browse flies</el-button>
-          </div>
+          <!-- <div style="">
+          <el-button style="margin: 0 20px" type="text" @click="confirmUpload">
+            Browse flies
+          </el-button>
+        </div> -->
         </el-upload>
       </el-form-item>
 
       <el-form-item>
         <div style="font-size: 18px">请输入知识库介绍：</div>
-        <el-input type="textarea" :rows="5" v-model="formSelect.textarea" />
+        <el-input
+          type="textarea"
+          :rows="5"
+          v-model="formSelect.textarea"
+          @blur="handleUpdateInfo"
+        />
       </el-form-item>
 
       <el-form-item>
@@ -159,7 +175,7 @@
         </el-collapse>
       </el-form-item>
 
-      <el-button :disabled="isUpload" @click="handleAdd">
+      <el-button :disabled="isUpload" @click="confirmUpload">
         添加文件到知识库
       </el-button>
 
@@ -185,7 +201,7 @@
         style="width: 100%"
         @selection-change="handleSelectionChange"
       >
-        <el-table-column type="selection" width="55"> </el-table-column>
+        <el-table-column type="selection" width="40"> </el-table-column>
         <el-table-column type="index" width="50" label="序号"></el-table-column>
 
         <el-table-column
@@ -262,8 +278,13 @@
           >
             下载选中文档
           </el-button>
-          <el-button :disabled="isSelected">重新添加至向量库</el-button>
-          <el-button :disabled="isSelected">从向量库删除</el-button>
+          <!-- <el-button :disabled="isSelected">重新添加至向量库</el-button> -->
+          <el-button @click="handleVS('add')" :disabled="isSelected"
+            >添加至向量库</el-button
+          >
+          <el-button @click="handleVS('delete')" :disabled="isSelected"
+            >从向量库删除</el-button
+          >
           <el-button
             type="primary"
             @click="handleDelete"
@@ -293,32 +314,46 @@
 </template>
 
 <script>
-import { v4 as uuidv4 } from "uuid";
+import { fetchEventSource } from "@microsoft/fetch-event-source";
+import { getServerConfig } from "@/api/server";
+
+import {
+  getKbList, // 获取知识库列表
+  createKb, // 创建知识库
+  updateKbInfo, // 更新知识库介绍
+  deleteKb, // 删除知识库
+  getKbFileList, // 获取知识库的文件列表
+  deleteKbFile, // 删除知识库指定文件
+  uploadKbFile, // 上传文件到知识库，并/或 进行向量化
+  updateKbFile, // 更新现有文件到数据库
+  downloadFile, // 下载对应的知识文件
+  searchKb, // 搜索知识库
+  recreateVectorStore, // 根据content中文档重建向量库，流式输出处理进度
+} from "@/api/knowledge";
 
 export default {
-  props: ["customStyle", "handleReceive"],
+  props: ["customStyle"],
   data() {
     return {
+      headers: {
+        ["Content-Type"]: "multipart/form-data",
+      },
       activeNames: "1",
       nameKB: "",
-      nameTable: "知识库中包含源文件和向量库，请从下表中选择文件后操作",
+      nameTable: "",
       formKB: {},
-      createOptions: [
-        {
-          label: "samples(faiss @ m3e-base)",
-          value: "samples(faiss @ m3e-base)",
-        },
-        {
-          label: "新建知识库",
-          value: "新建知识库",
-        },
-      ],
+      createOptions: [],
       isCreate: false, // 默认是非创建页面
       formCreate: {
-        name: "",
+        knowledge_base_name: "",
         brief: "",
-        vector: "faiss",
-        embed: "ernie-tiny",
+        vector_store_type: "",
+        embed_model: "",
+      },
+      rulesCreate: {
+        knowledge_base_name: [
+          { required: true, message: "知识库名称不能为空", trigger: "blur" },
+        ],
       },
       vectorOption: [
         { label: "faiss", value: "1" },
@@ -349,29 +384,14 @@ export default {
         { label: "text-embedding-ada-002", value: "20" },
       ],
 
-      rulesCreate: {
-        name: [
-          { required: true, message: "知识库名称不能为空", trigger: "blur" },
-        ],
-      },
-
       formSelect: {
         textarea: "",
-        maxlength: 250,
-        overlength: 250,
+        maxlength: "",
+        overlength: "",
         checked: false,
       },
 
-      tableData: [
-        {
-          name: "text.txt",
-          loader: "UnstructuredFileLoader",
-          tokenizer: "ChineseRecursiveTextSpliter",
-          num: "42",
-          source: "success",
-          vector: "success",
-        },
-      ],
+      tableData: [],
 
       columns: [
         {
@@ -442,32 +462,9 @@ export default {
         },
       ],
 
-      filterAddress: "",
+      fileList: [],
 
-      fileList: [
-        {
-          name: "text2.txt",
-          loader: "UnstructuredFileLoader",
-          tokenizer: "ChineseRecursiveTextSpliter",
-          num: "42",
-          source: "success",
-          vector: "success",
-        },
-      ],
-
-      fileContent: `ChatGPT 是一个基于 GPT-3 的自然语言处理模型，它是 OpenAI 在 2020 年发布的一款聊天机器人模型。
-
-该模型是由一种叫做“生成式预训练 Transformer”（Generative Pre-trained Transformer，简称 GPT）的架构所构建的。GPT 架构是一种深度学习架构，由多个 Transformer 模块组成，能够通过预训练来学习语言模型，从而实现对各种文本任务的支持。
-
-ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进行真实对话的人工智能聊天机器人。它可以理解并回答用户的自然语言问题，例如“天气怎么样？”、“你会唱歌吗？”等问题。
-
-与其他聊天机器人不同的是，ChatGPT 不需要预先编写规则或模板，也不需要手动输入大量的对话数据，它能够自动学习用户的语言习惯和用词，并给出合适的回答。这使得 ChatGPT 可以更好地适应各种不同的语言环境和应用场景。
-
-当然，由于 ChatGPT 技术本身的局限性，它可能在某些方面表现不佳或响应不及时。此外，由于其在处理敏感话题方面的限制，会对某些特定类型的问题提供不完整或无法回答的回答。因此，在使用 ChatGPT 时需要谨慎和注意。
-
-总的来说，ChatGPT 是一款很有潜力的聊天机器人模型，可以用于多种场景，例如客服、助手、游戏NPC等。`,
-
-      isReqLoading: false,
+      fileContent: `ChatGPT`,
 
       isLoading: false,
 
@@ -478,112 +475,103 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
       selectedArray: "",
     };
   },
-
-  watch: {},
-
   created() {
-    if (this.createOptions.length > 1) {
-      this.isCreate = false;
-      var filteredArr = this.createOptions.filter((item) => {
-        return item.value !== "新建知识库";
-      });
-      console.log(filteredArr);
-      this.formKB.knowledge = filteredArr[0].value;
-      // 查找第一个出现(索引
-      var index = this.formKB.knowledge.indexOf("(");
-      // 截取字符串
-      var result = this.formKB.knowledge.slice(0, index);
-      this.nameKB = result;
-      this.formSelect.textarea = `关于 ${this.nameKB} 的简介`;
-    } else {
-      this.isCreate = true;
-    }
+    console.log(
+      "知识库表单created-------------------------------------------------------------------------------"
+    );
 
-    if (this.fileList.length == 0) {
-      this.isUpload = true;
-    } else {
-      this.isUpload = false;
-    }
+    // 获取知识库列表
+    this.getList();
 
-    if (this.tableData.length == 0) {
-      this.nameTable = "知识库暂时没有文件";
-    } else {
-      this.nameTable = "知识库中包含源文件和向量库，请从下表中选择文件后操作";
-    }
+    // 获取服务器原始配置信息
+    getServerConfig()
+      .then((res) => {
+        this.formSelect.maxlength = res["CHUNK_SIZE"];
+        this.formSelect.overlength = res["OVERLAP_SIZE"];
+        this.formSelect.checked = res["ZH_TITLE_ENHANCE"];
+        this.formCreate.vector_store_type = res["DEFAULT_VS_TYPE"];
+        this.formCreate.embed_model = res["EMBEDDING_MODEL"];
+      })
+      .catch(() => {});
   },
 
   methods: {
+    // 获取知识库列表
+    getList() {
+      getKbList()
+        .then((res) => {
+          res.push("新建知识库");
+
+          this.createOptions = res.map((item) => {
+            return { label: item, value: item };
+          });
+
+          if (this.createOptions.length > 1) {
+            this.isCreate = false;
+            this.formKB.knowledge = this.createOptions[0].value;
+            this.nameKB = this.createOptions[0].value;
+            this.formSelect.textarea = `关于 ${this.nameKB} 的简介`;
+            this.handleFileList(this.createOptions[0].value);
+
+            // console.log(this.createOptions);
+          } else {
+            this.isCreate = true;
+          }
+        })
+        .catch(() => {});
+    },
+
     // 新建知识库
     handleCreate() {
-      console.log(this.formCreate);
       this.$refs["formCreate"].validate((valid) => {
         if (valid) {
-          // loading 效果
-          this.isReqLoading = true;
-          setTimeout(() => {
-            this.isReqLoading = false;
-          }, 5000);
-          // 提交的表单内容加入到createOptions中
-          let value = `${this.formCreate.name}(${this.formCreate.vector} @ ${this.formCreate.embed})`;
-          this.createOptions.unshift({
-            value: value,
-            label: value,
+          delete this.formCreate.brief;
+          createKb(this.formCreate).then((res) => {
+            this.$message.success("创建知识库成功");
+            this.getList();
+            this.isCreate = false;
+            this.formCreate = {
+              knowledge_base_name: "",
+              brief: "",
+              vector_store_type: "faiss",
+              embed_model: "m3e-base",
+            };
           });
-          // 返回非创建页面
-          this.isCreate = false;
-          // 更新formKB.knowledge
-          var filteredArr = this.createOptions.filter((item) => {
-            return item.value !== "新建知识库";
-          });
-
-          var knowOptions = filteredArr.map((item) => {
-            var index = item.value.indexOf("(");
-            var result = item.value.slice(0, index);
-            return { value: result, label: result };
-          });
-
-          // console.log(knowOptions)
-
-          this.handleSend(knowOptions);
-
-          this.formKB.knowledge = filteredArr[0].value;
-          // 查找第一个出现(索引
-          var index = this.formKB.knowledge.indexOf("(");
-          // 截取字符串
-          var result = this.formKB.knowledge.slice(0, index);
-          this.nameKB = result;
-          this.formSelect.textarea = `关于 ${this.nameKB} 的简介`;
-
-          // 初始化创建表单
-          this.formCreate = {
-            name: "",
-            brief: "",
-            vector: "faiss",
-            embed: "ernie-tiny",
-          };
         } else {
-          // console.log("error submit!!");
+          console.log("error submit!!");
           return false;
         }
       });
     },
 
-    handleSend(options) {
-      this.handleReceive(options);
+    // 获取知识库文件
+    handleFileList(name) {
+      getKbFileList({ knowledge_base_name: name })
+        .then((res) => {
+          this.tableData = res.map((item) => {
+            return { name: item };
+          });
+
+          if (this.tableData.length == 0) {
+            this.nameTable = "知识库暂时没有文件";
+          } else {
+            this.nameTable =
+              "知识库中包含源文件和向量库，请从下表中选择文件后操作";
+          }
+        })
+        .catch(() => {});
     },
 
-    // 下载选中文档
-    handleLoad(fileName, fileContent) {
-      const element = document.createElement("a");
-      const file = new Blob([fileContent], {
-        type: "text/plain;charset=utf-8",
-      });
-      element.href = URL.createObjectURL(file);
-      element.download = fileName;
-      element.style.display = "none";
-      document.body.appendChild(element);
-      element.click();
-      document.body.removeChild(element);
+    // 更新知识库介绍
+    handleUpdateInfo(evt) {
+      updateKbInfo({
+        knowledge_base_name: this.formKB.knowledge,
+        kb_info: evt.target.value,
+      })
+        .then((res) => {
+          this.$message.success("更新知识库介绍");
+        })
+        .catch(() => {});
     },
 
     // 选择或新建知识库
@@ -591,62 +579,15 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
       if (val == "新建知识库") {
         this.isCreate = true;
       } else {
-        // console.log(val);
-        // 查找第一个出现(索引
-        var index = val.indexOf("(");
-        // 截取字符串
-        var result = val.slice(0, index);
-        this.nameKB = result;
+        this.handleFileList(val);
+        this.formKB.knowledge = val;
+        this.nameKB = val;
         this.formSelect.textarea = `关于 ${this.nameKB} 的简介`;
         this.isCreate = false;
       }
     },
 
-    handleUpload(file) {
-      console.log(file);
-      console.log(this.fileList);
-    },
-
-    handleRemove(file, fileList) {
-      this.fileList = fileList;
-      if (this.fileList.length == 0) {
-        this.isUpload = true;
-      } else {
-        this.isUpload = false;
-      }
-    },
-
-    handleError(err, file, fileList) {
-      this.$message.error("上传失败！");
-    },
-
-    handleSuccess(response, file, fileList) {
-      if (response.data.error == 0) {
-        file.response = response.data.data;
-        this.fileList.push(file);
-        if (this.fileList.length == 0) {
-          this.isUpload = true;
-        } else {
-          this.isUpload = false;
-        }
-      } else {
-        this.$message.error(response.data.message); //文件上传错误提示
-      }
-    },
-
-    handleAdd() {
-      this.tableData = this.tableData.concat(this.fileList);
-      if (this.tableData.length == 0) {
-        this.nameTable = "知识库暂时没有文件";
-      } else {
-        this.nameTable = "知识库中包含源文件和向量库，请从下表中选择文件后操作";
-      }
-      this.fileList = [];
-      this.isUpload = true;
-    },
-
     handleSelectionChange(val) {
-      // console.log(val);
       this.selectedArray = val;
       if (val.length > 0) {
         this.isSelected = false;
@@ -655,61 +596,226 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
       }
     },
 
+    // 删除知识库文件
+    handleDelete() {
+      let files = this.selectedArray.map((item) => {
+        return item.name;
+      });
+
+      deleteKbFile({
+        knowledge_base_name: this.formKB.knowledge,
+        file_names: files,
+        delete_content: false, // 是否从知识库删除
+        not_refresh_vs_cache: false, // 是否从向量库删除
+      })
+        .then((res) => {
+          this.handleFileList(this.formKB.knowledge);
+          this.$message.success("删除知识库文件成功");
+        })
+        .catch(() => {});
+    },
+
+    handleDeleteKB() {
+      deleteKb(JSON.stringify(this.formKB.knowledge))
+        .then((res) => {
+          this.getList();
+          this.$message.success("删除知识库成功");
+        })
+        .catch(() => {});
+    },
+
+    // 下载选中文档
+    handleLoad(fileName, fileContent) {
+      if (this.selectedArray.length > 1) {
+        this.$message.warning("请选择一个下载文档");
+      } else {
+        let url = `http://192.168.61.108:7861/knowledge_base/download_doc?knowledge_base_name=${
+          this.formKB.knowledge
+        }&file_name=${this.selectedArray[0].name}&preview=${false}`;
+
+        window.open(url);
+      }
+    },
+
+    // 自定义上传方法
+    httpRequest(obj) {
+      let name = this.fileList[0].name;
+      this.fileList = [];
+      this.fileList.push({ ...obj, name });
+    },
+
+    handleBeforeUpload(file) {
+      this.fileList.push(file);
+      this.isUpload = false;
+      const isLt200M = file.size / 1024 / 1024 < 200;
+      if (!isLt200M) {
+        this.$message.error("文件大小超过200MB限制");
+        return false;
+      }
+    },
+
+    // 添加文件到知识库
+    confirmUpload() {
+      var doc = JSON.stringify({
+        "test.txt": [
+          {
+            page_content: "custom doc",
+            metadata: {},
+            type: "Document",
+          },
+        ],
+      });
+
+      const params = new FormData();
+
+      this.fileList.forEach((item) => {
+        params.append("files", item.file);
+      });
+      console.log(this.fileList);
+
+      params.append("knowledge_base_name", this.formKB.knowledge);
+      params.append("override", false);
+      params.append("to_vector_store", false);
+      params.append("chunk_size", this.formSelect.maxlength);
+      params.append("chunk_overlap", this.formSelect.overlength);
+      params.append("zh_title_enhance", this.formSelect.checked);
+      params.append("docs", doc);
+      params.append("not_refresh_vs_cache", false);
+
+      uploadKbFile(params)
+        .then((res) => {
+          this.$message.success("上传成功");
+          this.isUpload = true;
+          this.fileList = [];
+        })
+        .catch(() => {
+          this.$message.error("上传失败");
+          this.isUpload = true;
+        });
+    },
+
+    handleExceed() {
+      this.$message({ type: "error", message: "最多支持1个附件上传" });
+    },
+
+    handleRemove(file, fileList) {
+      this.fileList = [];
+      this.isUpload = true;
+    },
+
+    handleRestart() {
+      this.getProgress();
+    },
+
+    async getProgress() {
+      this.isLoading = true;
+      const controller = new AbortController();
+      const signal = controller.signal;
+
+      let response = await fetchEventSource(
+        "http://192.168.61.108:7861/knowledge_base/recreate_vector_store",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          openWhenHidden: true,
+          signal: signal,
+          body: JSON.stringify({
+            knowledge_base_name: this.formKB.knowledge,
+            allow_empty_kb: true,
+            vs_type: "faiss",
+            embed_model: "m3e-base",
+            chunk_size: this.formSelect.maxlength,
+            chunk_overlap: this.formSelect.overlength,
+            zh_title_enhance: this.formSelect.checked,
+            not_refresh_vs_cache: false,
+          }),
+
+          onopen: async (response) => {
+            const encode = new TextDecoder("utf-8");
+
+            const reader = response.body.getReader();
+
+            while (true) {
+              console.log(this);
+              const { done, value } = await reader.read();
+              console.log("是否已经读完所有内容：", done);
+              if (done) {
+                this.isLoading = false;
+                controller.abort();
+                break;
+              }
+              const text = encode.decode(value);
+              console.log("内容：", text);
+            }
+            this.isLoading = false;
+          },
+
+          onmessage(event) {
+            console.log(event);
+          },
+
+          onerror(event) {
+            console.log("服务异常", event);
+          },
+
+          onclose() {
+            console.log("服务关闭");
+          },
+        }
+      );
+    },
+
+    // 向量库删除和添加
+    handleVS(type) {
+      var flag;
+      if (type == "add") {
+        flag = false;
+      } else {
+        flag = true;
+      }
+      var doc = JSON.stringify({
+        "test.txt": [
+          {
+            page_content: "custom doc",
+            metadata: {},
+            type: "Document",
+          },
+        ],
+      });
+      let files = this.selectedArray.map((item) => {
+        return item.name;
+      });
+      updateKbFile({
+        file_names: files,
+        knowledge_base_name: this.formKB.knowledge,
+        chunk_size: this.formSelect.maxlength,
+        chunk_overlap: this.formSelect.overlength,
+        zh_title_enhance: this.formSelect.checked,
+        override_custom_docs: false,
+        docs: doc,
+        not_refresh_vs_cache: flag,
+      })
+        .then((res) => {
+          this.$message.success("操作成功");
+        })
+        .catch(() => {});
+    },
+
     handleTableClick(column) {
       console.log(column);
     },
 
     handleSortChange(column) {
       this.$forceUpdate();
-      // console.log(column);
-    },
-
-    handleDelete() {
-      var res = this.tableData.filter((item) => {
-        return !this.selectedArray.includes(item);
-      });
-      this.tableData = res;
-      if (this.tableData.length == 0) {
-        this.nameTable = "知识库暂时没有文件";
-      } else {
-        this.nameTable = "知识库中包含源文件和向量库，请从下表中选择文件后操作";
-      }
-    },
-
-    handleRestart() {
-      this.isLoading = true; // 点击按钮后显示提示信息
-
-      setTimeout(() => {
-        this.isLoading = false; // 5秒后隐藏提示信息
-      }, 5000);
-    },
-
-    handleDeleteKB() {
-      // console.log(this.formKB.knowledge);
-      let res = this.createOptions.filter((item) => {
-        return item.value != this.formKB.knowledge;
-      });
-
-      this.createOptions = res;
-
-      if (this.createOptions.length == 1) {
-        this.formKB.knowledge = this.createOptions[0].value;
-        this.isCreate = true;
-      } else {
-        this.formKB.knowledge = this.createOptions[0].value;
-        // 查找第一个出现(索引
-        var index = this.formKB.knowledge.indexOf("(");
-        // 截取字符串
-        var result = this.formKB.knowledge.slice(0, index);
-        this.nameKB = result;
-        this.formSelect.textarea = `关于 ${this.nameKB} 的简介`;
-      }
-
-      console.log(res);
     },
   },
 };
 </script>
+
 <style lang="scss" scoped>
 .knowledge-base {
   width: 100%;
@@ -747,7 +853,7 @@ ChatGPT 的目标是成为一款能够自动回答用户提出的问题，并进
 ::v-deep .el-upload-dragger {
   display: flex;
   align-items: center;
-  width: 615px;
+  width: 700px;
   height: 100%;
 }
 .tag-name {
